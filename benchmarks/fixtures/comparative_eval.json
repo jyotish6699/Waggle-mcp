@@ -622,7 +622,7 @@
         },
         {
           "id": "schema_strategy_s2",
-          "timestamp": "2026-04-14T11:45:00+00:00",
+          "timestamp": "2026-04-11T11:45:00+00:00",
           "transcript": "User: Switch to Alembic autogenerate with manual review. Agent: Recording Alembic autogenerate plus manual review as the current migration flow.",
           "support_fact_ids": [
             "schema_alembic"
@@ -642,7 +642,7 @@
           "label": "Alembic autogenerate",
           "content": "Schema migrations now use Alembic autogenerate with manual review.",
           "node_type": "decision",
-          "timestamp": "2026-04-14T11:45:00+00:00"
+          "timestamp": "2026-04-11T11:45:00+00:00"
         }
       ]
     },
@@ -660,7 +660,7 @@
         },
         {
           "id": "onboarding_flow_s2",
-          "timestamp": "2026-04-16T09:25:00+00:00",
+          "timestamp": "2026-04-11T09:25:00+00:00",
           "transcript": "User: Redesign onboarding as a step-by-step wizard. Agent: Recording a step-by-step onboarding wizard as the current flow.",
           "support_fact_ids": [
             "onboarding_wizard"
@@ -680,7 +680,7 @@
           "label": "Wizard onboarding",
           "content": "Onboarding is now a step-by-step wizard.",
           "node_type": "decision",
-          "timestamp": "2026-04-16T09:25:00+00:00"
+          "timestamp": "2026-04-11T09:25:00+00:00"
         }
       ]
     },
@@ -698,7 +698,7 @@
         },
         {
           "id": "feature_flags_s2",
-          "timestamp": "2026-04-18T13:00:00+00:00",
+          "timestamp": "2026-04-11T13:00:00+00:00",
           "transcript": "User: Move feature flags into an internal control plane service. Agent: Recording the internal flag service as the current feature flag system.",
           "support_fact_ids": [
             "flags_control_plane"
@@ -718,7 +718,7 @@
           "label": "Internal flag service",
           "content": "Feature flags now live in an internal control plane service.",
           "node_type": "decision",
-          "timestamp": "2026-04-18T13:00:00+00:00"
+          "timestamp": "2026-04-11T13:00:00+00:00"
         }
       ]
     },
@@ -736,7 +736,7 @@
         },
         {
           "id": "sync_engine_s2",
-          "timestamp": "2026-04-20T17:20:00+00:00",
+          "timestamp": "2026-04-11T17:20:00+00:00",
           "transcript": "User: Prefer webhooks with polling fallback for missed events. Agent: Recording webhooks plus polling fallback as the current sync strategy.",
           "support_fact_ids": [
             "sync_webhooks_fallback"
@@ -756,7 +756,7 @@
           "label": "Webhook sync",
           "content": "Sync now prefers webhooks with polling fallback for missed events.",
           "node_type": "decision",
-          "timestamp": "2026-04-20T17:20:00+00:00"
+          "timestamp": "2026-04-11T17:20:00+00:00"
         }
       ]
     },
@@ -774,7 +774,7 @@
         },
         {
           "id": "observability_stack_s2",
-          "timestamp": "2026-04-22T14:15:00+00:00",
+          "timestamp": "2026-04-12T14:15:00+00:00",
           "transcript": "User: Add traces and service-level objectives. Agent: Recording traces and SLOs as the current observability stack.",
           "support_fact_ids": [
             "obs_traces_slos"
@@ -794,7 +794,7 @@
           "label": "Traces and SLOs",
           "content": "Observability now includes traces and service-level objectives.",
           "node_type": "decision",
-          "timestamp": "2026-04-22T14:15:00+00:00"
+          "timestamp": "2026-04-12T14:15:00+00:00"
         }
       ]
     },
@@ -812,7 +812,7 @@
         },
         {
           "id": "storage_policy_s2",
-          "timestamp": "2026-04-24T12:50:00+00:00",
+          "timestamp": "2026-04-12T12:50:00+00:00",
           "transcript": "User: Move cold uploads to S3 Intelligent-Tiering. Agent: Recording S3 Intelligent-Tiering for cold uploads as the current storage policy.",
           "support_fact_ids": [
             "storage_s3_tiering"
@@ -832,7 +832,7 @@
           "label": "S3 Intelligent-Tiering uploads",
           "content": "Cold uploads now use S3 Intelligent-Tiering.",
           "node_type": "decision",
-          "timestamp": "2026-04-24T12:50:00+00:00"
+          "timestamp": "2026-04-12T12:50:00+00:00"
         }
       ]
     },
@@ -850,7 +850,7 @@
         },
         {
           "id": "support_escalation_s2",
-          "timestamp": "2026-04-26T18:40:00+00:00",
+          "timestamp": "2026-04-12T18:40:00+00:00",
           "transcript": "User: Auto-page the on-call engineer for Sev1 incidents. Agent: Recording automatic on-call paging for Sev1 incidents as the current policy.",
           "support_fact_ids": [
             "support_auto_sev1"
@@ -870,7 +870,7 @@
           "label": "Auto-page Sev1",
           "content": "Sev1 incidents now automatically page the on-call engineer.",
           "node_type": "decision",
-          "timestamp": "2026-04-26T18:40:00+00:00"
+          "timestamp": "2026-04-12T18:40:00+00:00"
         }
       ]
     },
@@ -888,7 +888,7 @@
         },
         {
           "id": "data_ingestion_s2",
-          "timestamp": "2026-04-28T13:35:00+00:00",
+          "timestamp": "2026-04-12T13:35:00+00:00",
           "transcript": "User: Add NDJSON ingestion for streaming imports. Agent: Recording NDJSON as the current additional ingestion format.",
           "support_fact_ids": [
             "ingest_ndjson"
@@ -908,7 +908,7 @@
           "label": "NDJSON ingestion",
           "content": "Ingestion now also accepts NDJSON for streaming imports.",
           "node_type": "decision",
-          "timestamp": "2026-04-28T13:35:00+00:00"
+          "timestamp": "2026-04-12T13:35:00+00:00"
         }
       ]
     }

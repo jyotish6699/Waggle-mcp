@@ -9,7 +9,7 @@ Notes:
 ========================================================================
 waggle-mcp benchmark harness
 ========================================================================
-fixtures: extraction=12 retrieval_nodes=8 retrieval_queries=6 dedup_cases=6
+fixtures: extraction=18 retrieval_nodes=18 retrieval_queries=22 dedup_cases=22
 extraction     4/12 = 33% (backend=regex | cases=12)
 retrieval      5/6 = 83% (backend=semantic-query | corpus_nodes=8 | cases=6)
 deduplication  3/6 = 50% (backend=semantic-dedup | threshold=0.97 | positives=3, negatives=3 | cases=6)

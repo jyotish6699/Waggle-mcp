@@ -36,7 +36,11 @@ EXTRACT_BACKEND: Literal["auto", "llm", "regex"] = os.getenv("WAGGLE_EXTRACT_BAC
 EXTRACT_MODEL = os.getenv("WAGGLE_EXTRACT_MODEL", "mistral")
 MIN_CONFIDENCE = float(os.getenv("WAGGLE_EXTRACT_MIN_CONFIDENCE", "0.5"))
 OLLAMA_URL = os.getenv("WAGGLE_OLLAMA_URL", "http://localhost:11434")
-OLLAMA_TIMEOUT_SECONDS = float(os.getenv("WAGGLE_OLLAMA_TIMEOUT_SECONDS", "15"))
+
+try:
+    OLLAMA_TIMEOUT_SECONDS = float(os.getenv("WAGGLE_OLLAMA_TIMEOUT_SECONDS", "15"))
+except (ValueError, TypeError):
+    OLLAMA_TIMEOUT_SECONDS = 15.0
 
 # ---------------------------------------------------------------------------
 # Pydantic output schema

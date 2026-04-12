@@ -539,6 +539,7 @@ A pre-filled example is in [`codex_config.example.toml`](./codex_config.example.
 | `WAGGLE_EXTRACT_MODEL` | `mistral` | Ollama model name |
 | `WAGGLE_EXTRACT_MIN_CONFIDENCE` | `0.5` | float 0–1, facts below this are dropped |
 | `WAGGLE_OLLAMA_URL` | `http://localhost:11434` | Base URL for local Ollama |
+| `WAGGLE_OLLAMA_TIMEOUT_SECONDS` | `15` | Timeout in seconds for Ollama requests; used by extractor and benchmark harness |
 
 </details>
 
@@ -625,7 +626,7 @@ waggle-mcp/
 
 ---
 
-## Testing
+## Running tests
 
 ```bash
 .venv/bin/pytest -q

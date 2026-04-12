@@ -1168,11 +1168,11 @@ class MemoryGraph:
             # ── Layer 0b: numeric-conflict guard ───────────────────────
             # Same entity BUT different critical number (e.g. JWT 15min vs 1hr).
             # Conflicting numbers signal distinct facts, not duplicates.
-            if (
-                node_entity is not None
-                and existing_entity is not None
-                and node_entity[0] == existing_entity[0]  # same token
-                and contains_conflicting_numbers(node.content, existing_node.content)
+            # Also applies to non-entity facts that have conflicting numbers.
+            if contains_conflicting_numbers(node.content, existing_node.content) and (
+                node_entity is None
+                or existing_entity is None
+                or node_entity[0] == existing_entity[0]
             ):
                 continue
 

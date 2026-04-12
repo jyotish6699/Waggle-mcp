@@ -84,8 +84,16 @@ def load_benchmark_fixtures(fixtures_dir: Path | str = DEFAULT_FIXTURES_DIR) -> 
     retrieval_cases = json.loads((base / "retrieval_cases.json").read_text(encoding="utf-8"))
     dedup_cases = json.loads((base / "dedup_cases.json").read_text(encoding="utf-8"))
     comparative_eval = json.loads((base / "comparative_eval.json").read_text(encoding="utf-8"))
+
+    # Compute repo-relative path
+    try:
+        relative_dir = os.path.relpath(base, ROOT)
+    except ValueError:
+        # If relpath fails (e.g., different drives on Windows), fall back to absolute
+        relative_dir = str(base)
+
     return {
-        "base_dir": str(base),
+        "base_dir": relative_dir,
         "extraction_cases": extraction_cases,
         "retrieval_cases": retrieval_cases,
         "dedup_cases": dedup_cases,
@@ -595,6 +603,8 @@ def run_comparative_evaluation(
             "per_case": all_case_results,
             "failure_protocol": list(comparative_eval.get("failure_protocol", [])),
         }
+    except BenchmarkRuntimeError:
+        raise
     except Exception as exc:
         raise _embedding_benchmark_error(exc, embedding_model) from exc
 
@@ -624,6 +634,18 @@ def _format_metric(metric: MetricSummary) -> str:
 
 
 def build_markdown_summary(report: BenchmarkReport) -> str:
+    if not hasattr(report, "comparative") or report.comparative is None:
+        lines = ["# Waggle Benchmark Report", ""]
+        if hasattr(report, "error") and report.error:
+            lines.append(f"**Error:** {report.error}")
+        if hasattr(report, "status") and report.status:
+            lines.append(f"**Status:** {report.status}")
+        if hasattr(report, "failure_protocol") and report.failure_protocol:
+            lines.extend(["", "## Failure Protocol", ""])
+            for item in report.failure_protocol:
+                lines.append(f"- {item}")
+        return "\n".join(lines) + "\n"
+
     lines = [
         "# Waggle Comparative Evaluation",
         "",

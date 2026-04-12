@@ -15,8 +15,8 @@ Phase 3: Corpus hardening        → re-measures everything; must run against th
 
 ## Phase 1 — Dedup Improvement
 
-**Current state:** 18/22 = 82% at threshold 0.82. fp=0 across all thresholds.  
-Remaining 4 false-negatives are pure-paraphrase pairs with no entity anchor.
+**Current state:** 12/22 = 55% at threshold 0.82. fp=0 across all thresholds.
+Remaining 10 false-negatives are pure-paraphrase pairs with no entity anchor and other edge cases.
 
 **Target:** ≥90% on the existing 22-pair fixture without regressing false-friend rejection (maintain fp=0).
 

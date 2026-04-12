@@ -1,6 +1,6 @@
 {
   "fixtures": {
-    "directory": "/Users/abhigyanshekhar/Desktop/MCP/benchmarks/fixtures",
+    "directory": "benchmarks/fixtures",
     "extraction_cases": 12,
     "retrieval_nodes": 8,
     "retrieval_queries": 6,

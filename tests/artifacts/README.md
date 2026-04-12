@@ -24,7 +24,7 @@ Regenerate it at any time to update results against the current fixture set. The
 | `benchmarks/fixtures/extraction_cases.json` | 12 dialogue pairs for extraction accuracy |
 | `benchmarks/fixtures/retrieval_cases.json` | 18 nodes + 18 queries (6 easy, 12 adversarial) |
 | `benchmarks/fixtures/dedup_cases.json` | 22 node pairs (11 true-dup, 11 false-friend) |
-| `benchmarks/fixtures/comparative_eval.json` | 24 multi-session scenarios, 50 queries |
+| `benchmarks/fixtures/comparative_eval.json` | 24 multi-session scenarios, 66 retrieval queries (expanded from initial 50-query pilot) |
 
 ---
 

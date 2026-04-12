@@ -225,11 +225,27 @@ def extract_choice_entity(text: str) -> tuple[str, str] | None:
         # → None  (no recognisable technology token)
     """
     tokens = [t.lower() for t in _TOKEN_RE.findall(text)]
+    matches: list[tuple[str, str]] = []
+
+    # First pass: check individual tokens
     for token in tokens:
         category = _CHOICE_CATEGORY_BY_TOKEN.get(token)
         if category is not None:
-            return token, category
-    return None
+            matches.append((token, category))
+
+    # Second pass: check concatenated multi-token forms (e.g., "Next.js" → "nextjs")
+    for i in range(len(tokens)):
+        for j in range(i + 1, min(i + 4, len(tokens) + 1)):  # Check up to 3-token combinations
+            combined = "".join(tokens[i:j])
+            category = _CHOICE_CATEGORY_BY_TOKEN.get(combined)
+            if category is not None:
+                matches.append((combined, category))
+
+    if not matches:
+        return None
+
+    # Return the last match (handles reversal sentences correctly)
+    return matches[-1]
 
 
 def tokenize_text(value: str) -> set[str]:
