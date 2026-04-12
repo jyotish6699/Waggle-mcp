@@ -63,7 +63,7 @@ Memory doesn't just get stored — it flows through a lifecycle:
 You talk to your AI
         │
         ▼
-  observe_conversation()          ← AI drops the turn in; facts are auto-extracted
+  observe_conversation()          ← AI drops the turn in; facts are extracted via structured LLM (regex fallback)
         │
         ▼
   Graph nodes are created         ← "Chose PostgreSQL" becomes a decision node
@@ -186,7 +186,7 @@ complexity, but enough to reconstruct a meaningful timeline of decisions.
 
 | Tool | What it does |
 |------|-------------|
-| `observe_conversation` | **Drop a conversation turn in — facts auto-extracted, stored, and linked** |
+| `observe_conversation` | **Drop a conversation turn in — facts extracted via structured LLM (regex fallback), stored, and linked** |
 | `query_graph` | Semantic + temporal search across the graph |
 | `store_node` | Manually save a fact, preference, decision, or note |
 | `store_edge` | Link two nodes with a typed relationship |

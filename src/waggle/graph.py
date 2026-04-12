@@ -15,6 +15,7 @@ import numpy as np
 from waggle.auth import generate_api_key, hash_api_key, verify_api_key
 from waggle.embeddings import EmbeddingModel
 from waggle.errors import AuthenticationError, ValidationFailure
+from waggle.extractor import EXTRACT_BACKEND, extract_with_llm
 from waggle.intelligence import (
     compatible_node_types,
     detect_conflict_reason,
@@ -959,10 +960,17 @@ class MemoryGraph:
 
     def observe_conversation(self, *, user_message: str, assistant_response: str) -> ObservationResult:
         transcript = f"user: {user_message.strip()}\nassistant: {assistant_response.strip()}".strip()
-        candidates = extract_conversation_candidates(
-            user_message=user_message,
-            assistant_response=assistant_response,
-        )
+        candidates = None
+        
+        if EXTRACT_BACKEND in ("auto", "llm"):
+            candidates = extract_with_llm(user_message, assistant_response)
+            
+        if candidates is None:
+            candidates = extract_conversation_candidates(
+                user_message=user_message,
+                assistant_response=assistant_response,
+            )
+        
         result = ObservationResult()
         for candidate in candidates:
             store_result = self.add_node(
