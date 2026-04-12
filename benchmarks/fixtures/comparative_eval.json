@@ -1,0 +1,1475 @@
+{
+  "scenarios": [
+    {
+      "id": "db_stack",
+      "title": "Database stack migration",
+      "sessions": [
+        {
+          "id": "db_stack_s1",
+          "timestamp": "2026-01-05T09:00:00+00:00",
+          "transcript": "User: Keep SQLite for local development for now. Agent: Noted, SQLite is only used for local development.",
+          "support_fact_ids": [
+            "db_sqlite_local"
+          ]
+        },
+        {
+          "id": "db_stack_s2",
+          "timestamp": "2026-02-14T10:30:00+00:00",
+          "transcript": "User: Production is moving to PostgreSQL for parity and safer migrations. Agent: Recording PostgreSQL as the production database choice.",
+          "support_fact_ids": [
+            "db_postgres_prod"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "db_sqlite_local",
+          "label": "SQLite local only",
+          "content": "SQLite is only used for local development.",
+          "node_type": "decision",
+          "timestamp": "2026-01-05T09:00:00+00:00"
+        },
+        {
+          "id": "db_postgres_prod",
+          "label": "PostgreSQL production",
+          "content": "PostgreSQL is the production database for parity and safer migrations.",
+          "node_type": "decision",
+          "timestamp": "2026-02-14T10:30:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "auth_expiry",
+      "title": "Auth token expiry revision",
+      "sessions": [
+        {
+          "id": "auth_expiry_s1",
+          "timestamp": "2026-01-07T08:15:00+00:00",
+          "transcript": "User: JWT tokens expire after 15 minutes today. Agent: Captured, JWT tokens expire after 15 minutes.",
+          "support_fact_ids": [
+            "auth_jwt_15m"
+          ]
+        },
+        {
+          "id": "auth_expiry_s2",
+          "timestamp": "2026-03-03T16:45:00+00:00",
+          "transcript": "User: Extend auth expiry to 1 hour now that refresh rotation is stable. Agent: Updated, JWT tokens now expire after 1 hour.",
+          "support_fact_ids": [
+            "auth_jwt_1h"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "auth_jwt_15m",
+          "label": "JWT expiry 15 minutes",
+          "content": "JWT tokens expire after 15 minutes.",
+          "node_type": "fact",
+          "timestamp": "2026-01-07T08:15:00+00:00"
+        },
+        {
+          "id": "auth_jwt_1h",
+          "label": "JWT expiry 1 hour",
+          "content": "JWT tokens now expire after 1 hour.",
+          "node_type": "fact",
+          "timestamp": "2026-03-03T16:45:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "cache_backend",
+      "title": "Cache backend change",
+      "sessions": [
+        {
+          "id": "cache_backend_s1",
+          "timestamp": "2026-01-10T11:20:00+00:00",
+          "transcript": "User: Redis handles session caching because TTL support is simple. Agent: Saving Redis as the session cache backend.",
+          "support_fact_ids": [
+            "cache_redis_sessions"
+          ]
+        },
+        {
+          "id": "cache_backend_s2",
+          "timestamp": "2026-03-05T14:10:00+00:00",
+          "transcript": "User: Move session caching to KeyDB for active-active failover. Agent: Recording KeyDB as the new session cache backend.",
+          "support_fact_ids": [
+            "cache_keydb_sessions"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "cache_redis_sessions",
+          "label": "Redis session cache",
+          "content": "Redis handles session caching because TTL support is simple.",
+          "node_type": "decision",
+          "timestamp": "2026-01-10T11:20:00+00:00"
+        },
+        {
+          "id": "cache_keydb_sessions",
+          "label": "KeyDB session cache",
+          "content": "KeyDB now handles session caching for active-active failover.",
+          "node_type": "decision",
+          "timestamp": "2026-03-05T14:10:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "search_engine",
+      "title": "Search engine evolution",
+      "sessions": [
+        {
+          "id": "search_engine_s1",
+          "timestamp": "2026-01-12T12:00:00+00:00",
+          "transcript": "User: Start with PostgreSQL trigram search while traffic is low. Agent: Logged, PostgreSQL trigram search is the initial search engine.",
+          "support_fact_ids": [
+            "search_pg_trigram"
+          ]
+        },
+        {
+          "id": "search_engine_s2",
+          "timestamp": "2026-03-12T18:30:00+00:00",
+          "transcript": "User: Switch product search to OpenSearch for better ranking controls. Agent: Recording OpenSearch as the new product search engine.",
+          "support_fact_ids": [
+            "search_opensearch"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "search_pg_trigram",
+          "label": "Trigram search",
+          "content": "PostgreSQL trigram search was the initial search engine.",
+          "node_type": "decision",
+          "timestamp": "2026-01-12T12:00:00+00:00"
+        },
+        {
+          "id": "search_opensearch",
+          "label": "OpenSearch search",
+          "content": "OpenSearch is the current product search engine for better ranking controls.",
+          "node_type": "decision",
+          "timestamp": "2026-03-12T18:30:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "frontend_framework",
+      "title": "Frontend framework shift",
+      "sessions": [
+        {
+          "id": "frontend_framework_s1",
+          "timestamp": "2026-01-15T09:40:00+00:00",
+          "transcript": "User: Keep the frontend as a React SPA initially. Agent: Recorded, the frontend starts as a React SPA.",
+          "support_fact_ids": [
+            "frontend_react_spa"
+          ]
+        },
+        {
+          "id": "frontend_framework_s2",
+          "timestamp": "2026-02-21T13:50:00+00:00",
+          "transcript": "User: Move the frontend to Next.js for server rendering and routing. Agent: Recording Next.js as the current frontend framework.",
+          "support_fact_ids": [
+            "frontend_nextjs"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "frontend_react_spa",
+          "label": "React SPA",
+          "content": "The frontend started as a React SPA.",
+          "node_type": "decision",
+          "timestamp": "2026-01-15T09:40:00+00:00"
+        },
+        {
+          "id": "frontend_nextjs",
+          "label": "Next.js frontend",
+          "content": "The current frontend framework is Next.js for server rendering and routing.",
+          "node_type": "decision",
+          "timestamp": "2026-02-21T13:50:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "analytics_pipeline",
+      "title": "Analytics pipeline redesign",
+      "sessions": [
+        {
+          "id": "analytics_pipeline_s1",
+          "timestamp": "2026-01-18T07:30:00+00:00",
+          "transcript": "User: Run analytics as a nightly batch while volumes stay low. Agent: Saved, analytics run as a nightly batch.",
+          "support_fact_ids": [
+            "analytics_batch"
+          ]
+        },
+        {
+          "id": "analytics_pipeline_s2",
+          "timestamp": "2026-03-18T19:00:00+00:00",
+          "transcript": "User: Move analytics to streaming ingestion for near-real-time dashboards. Agent: Recording streaming ingestion as the current analytics pipeline.",
+          "support_fact_ids": [
+            "analytics_streaming"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "analytics_batch",
+          "label": "Nightly analytics batch",
+          "content": "Analytics initially ran as a nightly batch.",
+          "node_type": "decision",
+          "timestamp": "2026-01-18T07:30:00+00:00"
+        },
+        {
+          "id": "analytics_streaming",
+          "label": "Streaming analytics",
+          "content": "Analytics now use streaming ingestion for near-real-time dashboards.",
+          "node_type": "decision",
+          "timestamp": "2026-03-18T19:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "notifications",
+      "title": "Notification channel expansion",
+      "sessions": [
+        {
+          "id": "notifications_s1",
+          "timestamp": "2026-01-20T10:00:00+00:00",
+          "transcript": "User: Start notifications with email only to keep the first release simple. Agent: Noted, email is the only notification channel in v1.",
+          "support_fact_ids": [
+            "notify_email_only"
+          ]
+        },
+        {
+          "id": "notifications_s2",
+          "timestamp": "2026-03-22T15:15:00+00:00",
+          "transcript": "User: Add Slack notifications for ops alerts alongside email. Agent: Recording email plus Slack as the current notification setup.",
+          "support_fact_ids": [
+            "notify_email_slack"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "notify_email_only",
+          "label": "Email only notifications",
+          "content": "Email was the only notification channel in v1.",
+          "node_type": "decision",
+          "timestamp": "2026-01-20T10:00:00+00:00"
+        },
+        {
+          "id": "notify_email_slack",
+          "label": "Email and Slack notifications",
+          "content": "Notifications now use both email and Slack for ops alerts.",
+          "node_type": "decision",
+          "timestamp": "2026-03-22T15:15:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "billing_provider",
+      "title": "Billing provider change",
+      "sessions": [
+        {
+          "id": "billing_provider_s1",
+          "timestamp": "2026-01-22T09:10:00+00:00",
+          "transcript": "User: Stripe is the billing provider for launch. Agent: Logged, Stripe handles billing at launch.",
+          "support_fact_ids": [
+            "billing_stripe"
+          ]
+        },
+        {
+          "id": "billing_provider_s2",
+          "timestamp": "2026-03-25T12:25:00+00:00",
+          "transcript": "User: Migrate billing to Paddle for global tax handling. Agent: Recording Paddle as the current billing provider.",
+          "support_fact_ids": [
+            "billing_paddle"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "billing_stripe",
+          "label": "Stripe billing",
+          "content": "Stripe handled billing at launch.",
+          "node_type": "decision",
+          "timestamp": "2026-01-22T09:10:00+00:00"
+        },
+        {
+          "id": "billing_paddle",
+          "label": "Paddle billing",
+          "content": "Paddle is the current billing provider for global tax handling.",
+          "node_type": "decision",
+          "timestamp": "2026-03-25T12:25:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "deployment_target",
+      "title": "Deployment target migration",
+      "sessions": [
+        {
+          "id": "deployment_target_s1",
+          "timestamp": "2026-01-25T06:45:00+00:00",
+          "transcript": "User: Deploy the API to ECS first because the team already knows it. Agent: Saving ECS as the original API deployment target.",
+          "support_fact_ids": [
+            "deploy_ecs"
+          ]
+        },
+        {
+          "id": "deployment_target_s2",
+          "timestamp": "2026-03-28T17:55:00+00:00",
+          "transcript": "User: Move the API to Cloud Run for simpler autoscaling. Agent: Recording Cloud Run as the current API deployment target.",
+          "support_fact_ids": [
+            "deploy_cloud_run"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "deploy_ecs",
+          "label": "ECS deployment",
+          "content": "The API originally deployed to ECS because the team already knew it.",
+          "node_type": "decision",
+          "timestamp": "2026-01-25T06:45:00+00:00"
+        },
+        {
+          "id": "deploy_cloud_run",
+          "label": "Cloud Run deployment",
+          "content": "The API now deploys to Cloud Run for simpler autoscaling.",
+          "node_type": "decision",
+          "timestamp": "2026-03-28T17:55:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "docs_search",
+      "title": "Docs search upgrade",
+      "sessions": [
+        {
+          "id": "docs_search_s1",
+          "timestamp": "2026-01-28T13:00:00+00:00",
+          "transcript": "User: Use Algolia for docs search in the first release. Agent: Recorded, Algolia powers docs search initially.",
+          "support_fact_ids": [
+            "docs_algolia"
+          ]
+        },
+        {
+          "id": "docs_search_s2",
+          "timestamp": "2026-04-01T09:05:00+00:00",
+          "transcript": "User: Replace Algolia with local BM25 search to cut recurring cost. Agent: Recording local BM25 as the current docs search engine.",
+          "support_fact_ids": [
+            "docs_bm25"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "docs_algolia",
+          "label": "Algolia docs search",
+          "content": "Algolia powered docs search initially.",
+          "node_type": "decision",
+          "timestamp": "2026-01-28T13:00:00+00:00"
+        },
+        {
+          "id": "docs_bm25",
+          "label": "BM25 docs search",
+          "content": "Local BM25 now powers docs search to cut recurring cost.",
+          "node_type": "decision",
+          "timestamp": "2026-04-01T09:05:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "access_control",
+      "title": "Access control hardening",
+      "sessions": [
+        {
+          "id": "access_control_s1",
+          "timestamp": "2026-01-30T14:20:00+00:00",
+          "transcript": "User: Start with role-based access only. Agent: Logged, access control is role-based only in the initial version.",
+          "support_fact_ids": [
+            "access_rbac_only"
+          ]
+        },
+        {
+          "id": "access_control_s2",
+          "timestamp": "2026-04-03T18:10:00+00:00",
+          "transcript": "User: Add attribute-based rules for region and customer tier. Agent: Recording role plus attribute-based rules as the current access model.",
+          "support_fact_ids": [
+            "access_rbac_abac"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "access_rbac_only",
+          "label": "RBAC only",
+          "content": "Access control started as role-based access only.",
+          "node_type": "decision",
+          "timestamp": "2026-01-30T14:20:00+00:00"
+        },
+        {
+          "id": "access_rbac_abac",
+          "label": "RBAC and ABAC",
+          "content": "Access control now uses role-based and attribute-based rules for region and customer tier.",
+          "node_type": "decision",
+          "timestamp": "2026-04-03T18:10:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "mobile_offline",
+      "title": "Offline mobile support",
+      "sessions": [
+        {
+          "id": "mobile_offline_s1",
+          "timestamp": "2026-02-01T08:05:00+00:00",
+          "transcript": "User: Skip offline mode for the first mobile release. Agent: Noted, the first mobile release has no offline support.",
+          "support_fact_ids": [
+            "mobile_no_offline"
+          ]
+        },
+        {
+          "id": "mobile_offline_s2",
+          "timestamp": "2026-04-05T12:40:00+00:00",
+          "transcript": "User: Queue edits offline and sync them later. Agent: Recording offline edit queues as the current mobile behavior.",
+          "support_fact_ids": [
+            "mobile_offline_queue"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "mobile_no_offline",
+          "label": "No offline support",
+          "content": "The first mobile release had no offline support.",
+          "node_type": "decision",
+          "timestamp": "2026-02-01T08:05:00+00:00"
+        },
+        {
+          "id": "mobile_offline_queue",
+          "label": "Offline edit queue",
+          "content": "Mobile now queues edits offline and syncs them later.",
+          "node_type": "decision",
+          "timestamp": "2026-04-05T12:40:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "export_format",
+      "title": "Export format expansion",
+      "sessions": [
+        {
+          "id": "export_format_s1",
+          "timestamp": "2026-02-03T11:55:00+00:00",
+          "transcript": "User: Offer CSV export only for the first release. Agent: Logged, CSV is the only export format initially.",
+          "support_fact_ids": [
+            "export_csv_only"
+          ]
+        },
+        {
+          "id": "export_format_s2",
+          "timestamp": "2026-04-07T17:00:00+00:00",
+          "transcript": "User: Add Parquet export for data warehouse sync. Agent: Recording CSV and Parquet as the current export formats.",
+          "support_fact_ids": [
+            "export_csv_parquet"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "export_csv_only",
+          "label": "CSV only export",
+          "content": "CSV was the only export format initially.",
+          "node_type": "decision",
+          "timestamp": "2026-02-03T11:55:00+00:00"
+        },
+        {
+          "id": "export_csv_parquet",
+          "label": "CSV and Parquet export",
+          "content": "Exports now support both CSV and Parquet for data warehouse sync.",
+          "node_type": "decision",
+          "timestamp": "2026-04-07T17:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "incident_policy",
+      "title": "Incident rollback policy",
+      "sessions": [
+        {
+          "id": "incident_policy_s1",
+          "timestamp": "2026-02-05T07:15:00+00:00",
+          "transcript": "User: Do not auto-rollback on deploy failures yet. Agent: Noted, deployments do not auto-rollback initially.",
+          "support_fact_ids": [
+            "incident_no_autorollback"
+          ]
+        },
+        {
+          "id": "incident_policy_s2",
+          "timestamp": "2026-04-09T10:10:00+00:00",
+          "transcript": "User: Auto-rollback when 5xx error rate spikes after deploy. Agent: Recording auto-rollback on 5xx spikes as the current policy.",
+          "support_fact_ids": [
+            "incident_autorollback_5xx"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "incident_no_autorollback",
+          "label": "No auto rollback",
+          "content": "Deployments did not auto-rollback initially.",
+          "node_type": "decision",
+          "timestamp": "2026-02-05T07:15:00+00:00"
+        },
+        {
+          "id": "incident_autorollback_5xx",
+          "label": "Auto rollback on 5xx",
+          "content": "Deployments now auto-rollback when 5xx error rate spikes after deploy.",
+          "node_type": "decision",
+          "timestamp": "2026-04-09T10:10:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "retention_policy",
+      "title": "Retention policy update",
+      "sessions": [
+        {
+          "id": "retention_policy_s1",
+          "timestamp": "2026-02-07T16:20:00+00:00",
+          "transcript": "User: Keep logs for 30 days at first. Agent: Saved, log retention is 30 days initially.",
+          "support_fact_ids": [
+            "retention_logs_30d"
+          ]
+        },
+        {
+          "id": "retention_policy_s2",
+          "timestamp": "2026-04-10T19:35:00+00:00",
+          "transcript": "User: Keep audit logs for 90 days for compliance. Agent: Recording 90 day audit log retention as the current policy.",
+          "support_fact_ids": [
+            "retention_audit_90d"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "retention_logs_30d",
+          "label": "30 day log retention",
+          "content": "Log retention was 30 days initially.",
+          "node_type": "fact",
+          "timestamp": "2026-02-07T16:20:00+00:00"
+        },
+        {
+          "id": "retention_audit_90d",
+          "label": "90 day audit retention",
+          "content": "Audit logs now retain for 90 days for compliance.",
+          "node_type": "fact",
+          "timestamp": "2026-04-10T19:35:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "queue_backend",
+      "title": "Queue backend replacement",
+      "sessions": [
+        {
+          "id": "queue_backend_s1",
+          "timestamp": "2026-02-09T09:25:00+00:00",
+          "transcript": "User: Use Celery with Redis as the background job system. Agent: Logged, Celery with Redis is the original queue backend.",
+          "support_fact_ids": [
+            "queue_celery_redis"
+          ]
+        },
+        {
+          "id": "queue_backend_s2",
+          "timestamp": "2026-04-12T08:00:00+00:00",
+          "transcript": "User: Move workflows to Temporal for retries and visibility. Agent: Recording Temporal as the current workflow backend.",
+          "support_fact_ids": [
+            "queue_temporal"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "queue_celery_redis",
+          "label": "Celery and Redis",
+          "content": "Celery with Redis was the original background job system.",
+          "node_type": "decision",
+          "timestamp": "2026-02-09T09:25:00+00:00"
+        },
+        {
+          "id": "queue_temporal",
+          "label": "Temporal workflows",
+          "content": "Temporal is the current workflow backend for retries and visibility.",
+          "node_type": "decision",
+          "timestamp": "2026-04-12T08:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "schema_strategy",
+      "title": "Schema migration tooling",
+      "sessions": [
+        {
+          "id": "schema_strategy_s1",
+          "timestamp": "2026-02-11T10:50:00+00:00",
+          "transcript": "User: Write migrations manually at first. Agent: Saved, schema migrations are manual initially.",
+          "support_fact_ids": [
+            "schema_manual"
+          ]
+        },
+        {
+          "id": "schema_strategy_s2",
+          "timestamp": "2026-04-11T11:45:00+00:00",
+          "transcript": "User: Switch to Alembic autogenerate with manual review. Agent: Recording Alembic autogenerate plus manual review as the current migration flow.",
+          "support_fact_ids": [
+            "schema_alembic"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "schema_manual",
+          "label": "Manual migrations",
+          "content": "Schema migrations were manual initially.",
+          "node_type": "decision",
+          "timestamp": "2026-02-11T10:50:00+00:00"
+        },
+        {
+          "id": "schema_alembic",
+          "label": "Alembic autogenerate",
+          "content": "Schema migrations now use Alembic autogenerate with manual review.",
+          "node_type": "decision",
+          "timestamp": "2026-04-11T11:45:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "onboarding_flow",
+      "title": "Onboarding redesign",
+      "sessions": [
+        {
+          "id": "onboarding_flow_s1",
+          "timestamp": "2026-02-13T15:10:00+00:00",
+          "transcript": "User: Keep onboarding as a long single form first. Agent: Logged, onboarding starts as a long single form.",
+          "support_fact_ids": [
+            "onboarding_long_form"
+          ]
+        },
+        {
+          "id": "onboarding_flow_s2",
+          "timestamp": "2026-04-11T09:25:00+00:00",
+          "transcript": "User: Redesign onboarding as a step-by-step wizard. Agent: Recording a step-by-step onboarding wizard as the current flow.",
+          "support_fact_ids": [
+            "onboarding_wizard"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "onboarding_long_form",
+          "label": "Long-form onboarding",
+          "content": "Onboarding started as a long single form.",
+          "node_type": "decision",
+          "timestamp": "2026-02-13T15:10:00+00:00"
+        },
+        {
+          "id": "onboarding_wizard",
+          "label": "Wizard onboarding",
+          "content": "Onboarding is now a step-by-step wizard.",
+          "node_type": "decision",
+          "timestamp": "2026-04-11T09:25:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "feature_flags",
+      "title": "Feature flag management",
+      "sessions": [
+        {
+          "id": "feature_flags_s1",
+          "timestamp": "2026-02-15T08:30:00+00:00",
+          "transcript": "User: Feature flags are environment variables for now. Agent: Saved, feature flags are environment variables initially.",
+          "support_fact_ids": [
+            "flags_env_vars"
+          ]
+        },
+        {
+          "id": "feature_flags_s2",
+          "timestamp": "2026-04-11T13:00:00+00:00",
+          "transcript": "User: Move feature flags into an internal control plane service. Agent: Recording the internal flag service as the current feature flag system.",
+          "support_fact_ids": [
+            "flags_control_plane"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "flags_env_vars",
+          "label": "Env-var flags",
+          "content": "Feature flags were environment variables initially.",
+          "node_type": "decision",
+          "timestamp": "2026-02-15T08:30:00+00:00"
+        },
+        {
+          "id": "flags_control_plane",
+          "label": "Internal flag service",
+          "content": "Feature flags now live in an internal control plane service.",
+          "node_type": "decision",
+          "timestamp": "2026-04-11T13:00:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "sync_engine",
+      "title": "Sync engine upgrade",
+      "sessions": [
+        {
+          "id": "sync_engine_s1",
+          "timestamp": "2026-02-17T11:35:00+00:00",
+          "transcript": "User: Poll upstream systems every 15 minutes first. Agent: Logged, sync uses 15 minute polling initially.",
+          "support_fact_ids": [
+            "sync_polling"
+          ]
+        },
+        {
+          "id": "sync_engine_s2",
+          "timestamp": "2026-04-11T17:20:00+00:00",
+          "transcript": "User: Prefer webhooks with polling fallback for missed events. Agent: Recording webhooks plus polling fallback as the current sync strategy.",
+          "support_fact_ids": [
+            "sync_webhooks_fallback"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "sync_polling",
+          "label": "Polling sync",
+          "content": "Sync initially used 15 minute polling.",
+          "node_type": "decision",
+          "timestamp": "2026-02-17T11:35:00+00:00"
+        },
+        {
+          "id": "sync_webhooks_fallback",
+          "label": "Webhook sync",
+          "content": "Sync now prefers webhooks with polling fallback for missed events.",
+          "node_type": "decision",
+          "timestamp": "2026-04-11T17:20:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "observability_stack",
+      "title": "Observability stack change",
+      "sessions": [
+        {
+          "id": "observability_stack_s1",
+          "timestamp": "2026-02-19T10:10:00+00:00",
+          "transcript": "User: Start with logs only while traffic is low. Agent: Saved, observability starts with logs only.",
+          "support_fact_ids": [
+            "obs_logs_only"
+          ]
+        },
+        {
+          "id": "observability_stack_s2",
+          "timestamp": "2026-04-12T14:15:00+00:00",
+          "transcript": "User: Add traces and service-level objectives. Agent: Recording traces and SLOs as the current observability stack.",
+          "support_fact_ids": [
+            "obs_traces_slos"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "obs_logs_only",
+          "label": "Logs only",
+          "content": "Observability started with logs only.",
+          "node_type": "decision",
+          "timestamp": "2026-02-19T10:10:00+00:00"
+        },
+        {
+          "id": "obs_traces_slos",
+          "label": "Traces and SLOs",
+          "content": "Observability now includes traces and service-level objectives.",
+          "node_type": "decision",
+          "timestamp": "2026-04-12T14:15:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "storage_policy",
+      "title": "Object storage policy",
+      "sessions": [
+        {
+          "id": "storage_policy_s1",
+          "timestamp": "2026-02-21T07:05:00+00:00",
+          "transcript": "User: Store uploads in S3 Standard first. Agent: Logged, uploads go to S3 Standard initially.",
+          "support_fact_ids": [
+            "storage_s3_standard"
+          ]
+        },
+        {
+          "id": "storage_policy_s2",
+          "timestamp": "2026-04-12T12:50:00+00:00",
+          "transcript": "User: Move cold uploads to S3 Intelligent-Tiering. Agent: Recording S3 Intelligent-Tiering for cold uploads as the current storage policy.",
+          "support_fact_ids": [
+            "storage_s3_tiering"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "storage_s3_standard",
+          "label": "S3 Standard uploads",
+          "content": "Uploads went to S3 Standard initially.",
+          "node_type": "decision",
+          "timestamp": "2026-02-21T07:05:00+00:00"
+        },
+        {
+          "id": "storage_s3_tiering",
+          "label": "S3 Intelligent-Tiering uploads",
+          "content": "Cold uploads now use S3 Intelligent-Tiering.",
+          "node_type": "decision",
+          "timestamp": "2026-04-12T12:50:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "support_escalation",
+      "title": "Support escalation policy",
+      "sessions": [
+        {
+          "id": "support_escalation_s1",
+          "timestamp": "2026-02-23T09:00:00+00:00",
+          "transcript": "User: Escalate support tickets manually during business hours only. Agent: Saved, support escalations are manual and business-hours only.",
+          "support_fact_ids": [
+            "support_manual_bh"
+          ]
+        },
+        {
+          "id": "support_escalation_s2",
+          "timestamp": "2026-04-12T18:40:00+00:00",
+          "transcript": "User: Auto-page the on-call engineer for Sev1 incidents. Agent: Recording automatic on-call paging for Sev1 incidents as the current policy.",
+          "support_fact_ids": [
+            "support_auto_sev1"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "support_manual_bh",
+          "label": "Manual business-hour escalation",
+          "content": "Support escalations were manual and business-hours only.",
+          "node_type": "decision",
+          "timestamp": "2026-02-23T09:00:00+00:00"
+        },
+        {
+          "id": "support_auto_sev1",
+          "label": "Auto-page Sev1",
+          "content": "Sev1 incidents now automatically page the on-call engineer.",
+          "node_type": "decision",
+          "timestamp": "2026-04-12T18:40:00+00:00"
+        }
+      ]
+    },
+    {
+      "id": "data_ingestion",
+      "title": "Data ingestion format update",
+      "sessions": [
+        {
+          "id": "data_ingestion_s1",
+          "timestamp": "2026-02-25T11:15:00+00:00",
+          "transcript": "User: Accept CSV uploads first for ingestion. Agent: Logged, ingestion accepts CSV uploads initially.",
+          "support_fact_ids": [
+            "ingest_csv"
+          ]
+        },
+        {
+          "id": "data_ingestion_s2",
+          "timestamp": "2026-04-12T13:35:00+00:00",
+          "transcript": "User: Add NDJSON ingestion for streaming imports. Agent: Recording NDJSON as the current additional ingestion format.",
+          "support_fact_ids": [
+            "ingest_ndjson"
+          ]
+        }
+      ],
+      "facts": [
+        {
+          "id": "ingest_csv",
+          "label": "CSV ingestion",
+          "content": "Ingestion accepted CSV uploads initially.",
+          "node_type": "decision",
+          "timestamp": "2026-02-25T11:15:00+00:00"
+        },
+        {
+          "id": "ingest_ndjson",
+          "label": "NDJSON ingestion",
+          "content": "Ingestion now also accepts NDJSON for streaming imports.",
+          "node_type": "decision",
+          "timestamp": "2026-04-12T13:35:00+00:00"
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "id": "q01",
+      "task_family": "temporal_latest",
+      "query": "what is the latest production database choice",
+      "gold_support_ids": [
+        "db_postgres_prod"
+      ]
+    },
+    {
+      "id": "q02",
+      "task_family": "temporal_original",
+      "query": "what was the original local database plan",
+      "gold_support_ids": [
+        "db_sqlite_local"
+      ]
+    },
+    {
+      "id": "q03",
+      "task_family": "multi_session_change",
+      "query": "what changed about the database stack",
+      "gold_support_ids": [
+        "db_sqlite_local",
+        "db_postgres_prod"
+      ]
+    },
+    {
+      "id": "q04",
+      "task_family": "temporal_latest",
+      "query": "what is the current jwt expiry",
+      "gold_support_ids": [
+        "auth_jwt_1h"
+      ]
+    },
+    {
+      "id": "q05",
+      "task_family": "temporal_original",
+      "query": "how long did jwt tokens expire for originally",
+      "gold_support_ids": [
+        "auth_jwt_15m"
+      ]
+    },
+    {
+      "id": "q06",
+      "task_family": "multi_session_change",
+      "query": "what changed about auth expiry",
+      "gold_support_ids": [
+        "auth_jwt_15m",
+        "auth_jwt_1h"
+      ]
+    },
+    {
+      "id": "q07",
+      "task_family": "factual_recall",
+      "query": "which cache backend handles sessions now",
+      "gold_support_ids": [
+        "cache_keydb_sessions"
+      ]
+    },
+    {
+      "id": "q08",
+      "task_family": "temporal_original",
+      "query": "which cache backend handled sessions first",
+      "gold_support_ids": [
+        "cache_redis_sessions"
+      ]
+    },
+    {
+      "id": "q09",
+      "task_family": "multi_session_change",
+      "query": "what changed in the session cache backend",
+      "gold_support_ids": [
+        "cache_redis_sessions",
+        "cache_keydb_sessions"
+      ]
+    },
+    {
+      "id": "q10",
+      "task_family": "factual_recall",
+      "query": "what search engine is currently used for product search",
+      "gold_support_ids": [
+        "search_opensearch"
+      ]
+    },
+    {
+      "id": "q11",
+      "task_family": "temporal_original",
+      "query": "what search engine did we start with",
+      "gold_support_ids": [
+        "search_pg_trigram"
+      ]
+    },
+    {
+      "id": "q12",
+      "task_family": "multi_session_change",
+      "query": "what changed about search",
+      "gold_support_ids": [
+        "search_pg_trigram",
+        "search_opensearch"
+      ]
+    },
+    {
+      "id": "q13",
+      "task_family": "factual_recall",
+      "query": "what frontend framework do we use now",
+      "gold_support_ids": [
+        "frontend_nextjs"
+      ]
+    },
+    {
+      "id": "q14",
+      "task_family": "temporal_original",
+      "query": "what was the original frontend architecture",
+      "gold_support_ids": [
+        "frontend_react_spa"
+      ]
+    },
+    {
+      "id": "q15",
+      "task_family": "multi_session_change",
+      "query": "how did the frontend plan change",
+      "gold_support_ids": [
+        "frontend_react_spa",
+        "frontend_nextjs"
+      ]
+    },
+    {
+      "id": "q16",
+      "task_family": "factual_recall",
+      "query": "what analytics pipeline do we use now",
+      "gold_support_ids": [
+        "analytics_streaming"
+      ]
+    },
+    {
+      "id": "q17",
+      "task_family": "temporal_original",
+      "query": "how did analytics run at first",
+      "gold_support_ids": [
+        "analytics_batch"
+      ]
+    },
+    {
+      "id": "q18",
+      "task_family": "multi_session_change",
+      "query": "what changed in analytics processing",
+      "gold_support_ids": [
+        "analytics_batch",
+        "analytics_streaming"
+      ]
+    },
+    {
+      "id": "q19",
+      "task_family": "factual_recall",
+      "query": "which notification channels are active now",
+      "gold_support_ids": [
+        "notify_email_slack"
+      ]
+    },
+    {
+      "id": "q20",
+      "task_family": "temporal_original",
+      "query": "what notification setup shipped in v1",
+      "gold_support_ids": [
+        "notify_email_only"
+      ]
+    },
+    {
+      "id": "q21",
+      "task_family": "multi_session_change",
+      "query": "what changed in notifications",
+      "gold_support_ids": [
+        "notify_email_only",
+        "notify_email_slack"
+      ]
+    },
+    {
+      "id": "q22",
+      "task_family": "factual_recall",
+      "query": "what billing provider is current",
+      "gold_support_ids": [
+        "billing_paddle"
+      ]
+    },
+    {
+      "id": "q23",
+      "task_family": "temporal_original",
+      "query": "which billing provider did we launch with",
+      "gold_support_ids": [
+        "billing_stripe"
+      ]
+    },
+    {
+      "id": "q24",
+      "task_family": "multi_session_change",
+      "query": "what changed in billing",
+      "gold_support_ids": [
+        "billing_stripe",
+        "billing_paddle"
+      ]
+    },
+    {
+      "id": "q25",
+      "task_family": "factual_recall",
+      "query": "where does the api deploy now",
+      "gold_support_ids": [
+        "deploy_cloud_run"
+      ]
+    },
+    {
+      "id": "q26",
+      "task_family": "temporal_original",
+      "query": "where did the api deploy originally",
+      "gold_support_ids": [
+        "deploy_ecs"
+      ]
+    },
+    {
+      "id": "q27",
+      "task_family": "multi_session_change",
+      "query": "what changed about deployment target",
+      "gold_support_ids": [
+        "deploy_ecs",
+        "deploy_cloud_run"
+      ]
+    },
+    {
+      "id": "q28",
+      "task_family": "factual_recall",
+      "query": "what powers docs search now",
+      "gold_support_ids": [
+        "docs_bm25"
+      ]
+    },
+    {
+      "id": "q29",
+      "task_family": "temporal_original",
+      "query": "what powered docs search before",
+      "gold_support_ids": [
+        "docs_algolia"
+      ]
+    },
+    {
+      "id": "q30",
+      "task_family": "multi_session_change",
+      "query": "what changed in docs search",
+      "gold_support_ids": [
+        "docs_algolia",
+        "docs_bm25"
+      ]
+    },
+    {
+      "id": "q31",
+      "task_family": "factual_recall",
+      "query": "what access model is current",
+      "gold_support_ids": [
+        "access_rbac_abac"
+      ]
+    },
+    {
+      "id": "q32",
+      "task_family": "temporal_original",
+      "query": "what was the original access model",
+      "gold_support_ids": [
+        "access_rbac_only"
+      ]
+    },
+    {
+      "id": "q33",
+      "task_family": "multi_session_change",
+      "query": "what changed in access control",
+      "gold_support_ids": [
+        "access_rbac_only",
+        "access_rbac_abac"
+      ]
+    },
+    {
+      "id": "q34",
+      "task_family": "factual_recall",
+      "query": "how does mobile handle offline edits now",
+      "gold_support_ids": [
+        "mobile_offline_queue"
+      ]
+    },
+    {
+      "id": "q35",
+      "task_family": "temporal_original",
+      "query": "did the first mobile release support offline mode",
+      "gold_support_ids": [
+        "mobile_no_offline"
+      ]
+    },
+    {
+      "id": "q36",
+      "task_family": "factual_recall",
+      "query": "which export formats do we support now",
+      "gold_support_ids": [
+        "export_csv_parquet"
+      ]
+    },
+    {
+      "id": "q37",
+      "task_family": "temporal_original",
+      "query": "what was the original export format",
+      "gold_support_ids": [
+        "export_csv_only"
+      ]
+    },
+    {
+      "id": "q38",
+      "task_family": "factual_recall",
+      "query": "when do deployments auto rollback now",
+      "gold_support_ids": [
+        "incident_autorollback_5xx"
+      ]
+    },
+    {
+      "id": "q39",
+      "task_family": "temporal_original",
+      "query": "did deployments auto rollback at first",
+      "gold_support_ids": [
+        "incident_no_autorollback"
+      ]
+    },
+    {
+      "id": "q40",
+      "task_family": "factual_recall",
+      "query": "what is the current audit log retention period",
+      "gold_support_ids": [
+        "retention_audit_90d"
+      ]
+    },
+    {
+      "id": "q41",
+      "task_family": "temporal_original",
+      "query": "what was the original log retention period",
+      "gold_support_ids": [
+        "retention_logs_30d"
+      ]
+    },
+    {
+      "id": "q42",
+      "task_family": "factual_recall",
+      "query": "what workflow backend do we use now",
+      "gold_support_ids": [
+        "queue_temporal"
+      ]
+    },
+    {
+      "id": "q43",
+      "task_family": "temporal_original",
+      "query": "what was the original background job system",
+      "gold_support_ids": [
+        "queue_celery_redis"
+      ]
+    },
+    {
+      "id": "q44",
+      "task_family": "factual_recall",
+      "query": "how are schema migrations handled now",
+      "gold_support_ids": [
+        "schema_alembic"
+      ]
+    },
+    {
+      "id": "q45",
+      "task_family": "temporal_original",
+      "query": "how were schema migrations handled originally",
+      "gold_support_ids": [
+        "schema_manual"
+      ]
+    },
+    {
+      "id": "q46",
+      "task_family": "factual_recall",
+      "query": "what onboarding flow do we use now",
+      "gold_support_ids": [
+        "onboarding_wizard"
+      ]
+    },
+    {
+      "id": "q47",
+      "task_family": "temporal_original",
+      "query": "what onboarding flow did we start with",
+      "gold_support_ids": [
+        "onboarding_long_form"
+      ]
+    },
+    {
+      "id": "q48",
+      "task_family": "factual_recall",
+      "query": "how are feature flags managed now",
+      "gold_support_ids": [
+        "flags_control_plane"
+      ]
+    },
+    {
+      "id": "q49",
+      "task_family": "temporal_original",
+      "query": "how were feature flags managed before",
+      "gold_support_ids": [
+        "flags_env_vars"
+      ]
+    },
+    {
+      "id": "q50",
+      "task_family": "factual_recall",
+      "query": "what sync strategy is current",
+      "gold_support_ids": [
+        "sync_webhooks_fallback"
+      ]
+    },
+    {
+      "id": "q51",
+      "query": "what database and deployment platform are we currently using in production",
+      "gold_support_ids": [
+        "db_postgres_prod",
+        "deploy_cloud_run"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q52",
+      "query": "describe our current auth and mobile offline strategy",
+      "gold_support_ids": [
+        "auth_jwt_1h",
+        "mobile_offline_queue"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q53",
+      "query": "how do we handle production incidents and what observability tools do we use",
+      "gold_support_ids": [
+        "obs_traces_slos",
+        "incident_autorollback_5xx"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q54",
+      "query": "what are our current data pipeline choices for ingestion and export",
+      "gold_support_ids": [
+        "ingest_ndjson",
+        "export_csv_parquet"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q55",
+      "query": "what workflow engine and schema migration tool are we using",
+      "gold_support_ids": [
+        "queue_temporal",
+        "schema_alembic"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q56",
+      "query": "how do we manage storage costs and data retention compliance",
+      "gold_support_ids": [
+        "storage_s3_tiering",
+        "retention_audit_90d"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q57",
+      "query": "how are feature flags and access permissions controlled",
+      "gold_support_ids": [
+        "flags_control_plane",
+        "access_rbac_abac"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q58",
+      "query": "how does our system get notified of upstream changes and what do we alert on",
+      "gold_support_ids": [
+        "sync_webhooks_fallback",
+        "notify_email_slack"
+      ],
+      "task_family": "cross_scenario_synthesis"
+    },
+    {
+      "id": "q59",
+      "query": "why did we stop using the simpler local datastore",
+      "gold_support_ids": [
+        "db_postgres_prod"
+      ],
+      "task_family": "adversarial_paraphrase"
+    },
+    {
+      "id": "q60",
+      "query": "what decision did we make to cut infrastructure management overhead in serving",
+      "gold_support_ids": [
+        "deploy_cloud_run"
+      ],
+      "task_family": "adversarial_paraphrase"
+    },
+    {
+      "id": "q61",
+      "query": "can users keep working on the app when they have no internet",
+      "gold_support_ids": [
+        "mobile_offline_queue"
+      ],
+      "task_family": "adversarial_paraphrase"
+    },
+    {
+      "id": "q62",
+      "query": "if a release causes errors immediately after going live what happens automatically",
+      "gold_support_ids": [
+        "incident_autorollback_5xx"
+      ],
+      "task_family": "adversarial_paraphrase"
+    },
+    {
+      "id": "q63",
+      "query": "we changed our search implementation at some point — what was the before and after",
+      "gold_support_ids": [
+        "search_pg_trigram",
+        "search_opensearch"
+      ],
+      "task_family": "decision_delta"
+    },
+    {
+      "id": "q64",
+      "query": "walk me through how our billing provider changed and what drove it",
+      "gold_support_ids": [
+        "billing_stripe",
+        "billing_paddle"
+      ],
+      "task_family": "decision_delta"
+    },
+    {
+      "id": "q65",
+      "query": "how has our onboarding experience evolved across sessions",
+      "gold_support_ids": [
+        "onboarding_long_form",
+        "onboarding_wizard"
+      ],
+      "task_family": "decision_delta"
+    },
+    {
+      "id": "q66",
+      "query": "what was our background job architecture before and what replaced it",
+      "gold_support_ids": [
+        "queue_celery_redis",
+        "queue_temporal"
+      ],
+      "task_family": "decision_delta"
+    }
+  ],
+  "failure_protocol": [
+    "If Waggle token reduction is under 15 percent, inspect whether graph serialization or context assembly is offsetting compression gains.",
+    "If the tuned baseline matches Waggle on retrieval quality, frame the result as efficiency and structure first rather than retrieval superiority.",
+    "If temporal queries do not separate systems, audit whether the corpus actually requires temporal reasoning before expanding claims.",
+    "If multi-session change queries are inconclusive, expand that slice before broadening the whole pilot corpus."
+  ]
+}

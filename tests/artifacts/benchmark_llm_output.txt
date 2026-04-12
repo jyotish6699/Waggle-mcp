@@ -1,0 +1,24 @@
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 5667.46it/s]
+[1mBertModel LOAD REPORT[0m from: sentence-transformers/all-MiniLM-L6-v2
+Key                     | Status     |  | 
+------------------------+------------+--+-
+embeddings.position_ids | UNEXPECTED |  | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+========================================================================
+waggle-mcp benchmark harness
+========================================================================
+fixtures: extraction=12 retrieval_nodes=8 retrieval_queries=6 dedup_cases=6
+extraction     9/12 = 75% (backend=llm | model=qwen2.5:7b | timeout=30.0s | cases=12)
+retrieval      5/6 = 83% (backend=semantic-query | corpus_nodes=8 | cases=6)
+deduplication  3/6 = 50% (backend=semantic-dedup | threshold=0.97 | positives=3, negatives=3 | cases=6)
+dedup threshold sweep:
+  deduplication  3/6 = 50% (backend=semantic-dedup | threshold=0.82 | positives=3, negatives=3 | cases=6)
+  deduplication  2/6 = 33% (backend=semantic-dedup | threshold=0.85 | positives=3, negatives=3 | cases=6)
+  deduplication  2/6 = 33% (backend=semantic-dedup | threshold=0.88 | positives=3, negatives=3 | cases=6)
+  deduplication  2/6 = 33% (backend=semantic-dedup | threshold=0.90 | positives=3, negatives=3 | cases=6)
+  deduplication  2/6 = 33% (backend=semantic-dedup | threshold=0.92 | positives=3, negatives=3 | cases=6)
+  deduplication  3/6 = 50% (backend=semantic-dedup | threshold=0.95 | positives=3, negatives=3 | cases=6)
+  deduplication  3/6 = 50% (backend=semantic-dedup | threshold=0.97 | positives=3, negatives=3 | cases=6)
+wrote JSON report to tests/artifacts/benchmark_llm.json

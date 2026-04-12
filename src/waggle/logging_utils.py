@@ -28,9 +28,9 @@ class JsonLogFormatter(logging.Formatter):
         return json.dumps(payload, sort_keys=True)
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", *, stream: object | None = None) -> None:
     root = logging.getLogger()
     root.setLevel(level.upper())
-    handler = logging.StreamHandler(sys.stdout)
+    handler = logging.StreamHandler(stream if stream is not None else sys.stdout)
     handler.setFormatter(JsonLogFormatter())
     root.handlers = [handler]

@@ -1,0 +1,157 @@
+[
+  {
+    "name": "postgres_exact_paraphrase",
+    "node_type": "decision",
+    "first":  { "label": "Use Postgres",        "content": "We decided to use PostgreSQL for the database" },
+    "second": { "label": "PostgreSQL chosen",    "content": "The team decided on PostgreSQL for the primary database" },
+    "should_dedup": true
+  },
+  {
+    "name": "dark_mode_paraphrase",
+    "node_type": "preference",
+    "first":  { "label": "Dark mode preferred",  "content": "User prefers dark mode on every interface" },
+    "second": { "label": "Dark mode preference", "content": "The user wants dark mode across the UI" },
+    "should_dedup": true
+  },
+  {
+    "name": "fastapi_paraphrase",
+    "node_type": "decision",
+    "first":  { "label": "FastAPI choice",    "content": "FastAPI was chosen as the backend framework" },
+    "second": { "label": "FastAPI selected",  "content": "We chose FastAPI because async support matters" },
+    "should_dedup": true
+  },
+  {
+    "name": "jwt_expiry_synonym",
+    "node_type": "fact",
+    "first":  { "label": "JWT 15 min",    "content": "Access tokens expire after fifteen minutes" },
+    "second": { "label": "Token timeout", "content": "JWT access tokens have a 15-minute lifetime" },
+    "should_dedup": true
+  },
+  {
+    "name": "redis_cache_synonym",
+    "node_type": "decision",
+    "first":  { "label": "Redis for sessions",    "content": "We cache user sessions in Redis with a TTL" },
+    "second": { "label": "Session store is Redis","content": "Redis holds all session tokens; each entry expires via TTL" },
+    "should_dedup": true
+  },
+  {
+    "name": "neo4j_scale",
+    "node_type": "decision",
+    "first":  { "label": "Neo4j for prod",  "content": "Switched to Neo4j because SQLite can't handle concurrent writes" },
+    "second": { "label": "Production graph DB", "content": "Neo4j was chosen for production scale and concurrent write support" },
+    "should_dedup": true
+  },
+  {
+    "name": "rate_limit_paraphrase",
+    "node_type": "fact",
+    "first":  { "label": "Rate limit 120 rpm",   "content": "Global API rate limit is 120 requests per minute" },
+    "second": { "label": "API throttle policy",  "content": "Each tenant is throttled at 120 rpm globally" },
+    "should_dedup": true
+  },
+  {
+    "name": "embedding_model_paraphrase",
+    "node_type": "decision",
+    "first":  { "label": "Embedding model",         "content": "all-MiniLM-L6-v2 runs locally for semantic search" },
+    "second": { "label": "Local semantic search",   "content": "We use the MiniLM model on-device for vector embeddings" },
+    "should_dedup": true
+  },
+  {
+    "name": "postgres_vs_mysql_false_friend",
+    "node_type": "decision",
+    "first":  { "label": "Use Postgres", "content": "We decided to use PostgreSQL for the database" },
+    "second": { "label": "Use MySQL",    "content": "We decided to use MySQL for the database" },
+    "should_dedup": false
+  },
+  {
+    "name": "jwt_15m_vs_1h_false_friend",
+    "node_type": "fact",
+    "first":  { "label": "JWT expiry 15m", "content": "JWT tokens expire after 15 minutes" },
+    "second": { "label": "JWT expiry 1h",  "content": "JWT tokens expire after 1 hour" },
+    "should_dedup": false
+  },
+  {
+    "name": "redis_session_vs_queue_false_friend",
+    "node_type": "concept",
+    "first":  { "label": "Redis session cache", "content": "Redis caches user sessions with TTL support" },
+    "second": { "label": "Redis job queue",     "content": "Redis powers the background job queue for async work" },
+    "should_dedup": false
+  },
+  {
+    "name": "fastapi_vs_flask_false_friend",
+    "node_type": "decision",
+    "first":  { "label": "FastAPI chosen", "content": "FastAPI was selected as the backend framework" },
+    "second": { "label": "Flask rejected", "content": "Flask was ruled out because it lacks native async support" },
+    "should_dedup": false
+  },
+  {
+    "name": "sqlite_dev_vs_neo4j_prod_false_friend",
+    "node_type": "decision",
+    "first":  { "label": "SQLite for dev",    "content": "SQLite is used for local development only" },
+    "second": { "label": "Neo4j for production", "content": "Neo4j is used for production deployments" },
+    "should_dedup": false
+  },
+  {
+    "name": "graphql_rejected_vs_rest_chosen_false_friend",
+    "node_type": "decision",
+    "first":  { "label": "GraphQL rejected", "content": "Team decided against GraphQL due to lack of expertise" },
+    "second": { "label": "REST API chosen",  "content": "REST was chosen as the API style for all public endpoints" },
+    "should_dedup": false
+  },
+  {
+    "name": "rate_limit_global_vs_user_false_friend",
+    "node_type": "fact",
+    "first":  { "label": "Global rate limit",    "content": "Global rate limit is 120 requests per minute across all tenants" },
+    "second": { "label": "Per-user rate limit",  "content": "Individual users are limited to 10 requests per minute" },
+    "should_dedup": false
+  },
+  {
+    "name": "rolling_update_vs_blue_green_false_friend",
+    "node_type": "decision",
+    "first":  { "label": "RollingUpdate strategy", "content": "Production uses Kubernetes RollingUpdate with 25% max surge" },
+    "second": { "label": "Blue-green option",       "content": "Blue-green deployment was considered but rejected due to resource cost" },
+    "should_dedup": false
+  },
+  {
+    "name": "dark_mode_vs_high_contrast_false_friend",
+    "node_type": "preference",
+    "first":  { "label": "Dark mode preferred",      "content": "User prefers dark mode across all interfaces" },
+    "second": { "label": "High contrast requested",  "content": "Accessibility team requested high-contrast mode for the dashboard" },
+    "should_dedup": false
+  },
+  {
+    "name": "jwt_15m_paraphrase_near_miss",
+    "node_type": "fact",
+    "first":  { "label": "short token lifetime",  "content": "Tokens are short-lived — 15 minutes — to reduce exposure" },
+    "second": { "label": "refresh token window",  "content": "Refresh tokens are valid for 7 days and rotate on each use" },
+    "should_dedup": false,
+    "note": "Near-miss: both are about token lifetimes but for different token types"
+  },
+  {
+    "name": "miniLM_vs_ada_false_friend",
+    "node_type": "decision",
+    "first":  { "label": "MiniLM local embeddings", "content": "all-MiniLM-L6-v2 runs on-device for vector search" },
+    "second": { "label": "OpenAI Ada considered",   "content": "text-embedding-ada-002 was considered but rejected due to API cost" },
+    "should_dedup": false
+  },
+  {
+    "name": "postgres_paraphrase_strong",
+    "node_type": "decision",
+    "first":  { "label": "Postgres for events",   "content": "PostgreSQL was chosen for storing all event data" },
+    "second": { "label": "Event store is Postgres","content": "All domain events are persisted to a PostgreSQL database" },
+    "should_dedup": true
+  },
+  {
+    "name": "async_critical_paraphrase",
+    "node_type": "fact",
+    "first":  { "label": "async required",       "content": "Async support is non-negotiable in our backend framework choice" },
+    "second": { "label": "concurrency requirement","content": "The backend must handle concurrent requests without blocking" },
+    "should_dedup": true
+  },
+  {
+    "name": "neo4j_concurrent_write_paraphrase",
+    "node_type": "fact",
+    "first":  { "label": "SQLite concurrent write limit", "content": "SQLite cannot handle concurrent writes at scale" },
+    "second": { "label": "write concurrency problem",     "content": "Multiple simultaneous writes caused SQLite locking issues" },
+    "should_dedup": true
+  }
+]

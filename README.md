@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://pypi.org/project/waggle-mcp"><img src="https://img.shields.io/pypi/v/waggle-mcp?color=39d5cf&label=pypi" alt="PyPI"/></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+"/>
-  <img src="https://img.shields.io/badge/MCP-compatible-brightgreen" alt="MCP"/>
+  <img src="https://img.shields.io/badge/MCP-compatible-brightgreen" alt="MCP compatible"/>
   <img src="https://img.shields.io/badge/embeddings-local%2C%20no%20API%20key-orange" alt="Local embeddings"/>
   <img src="https://img.shields.io/badge/license-MIT-lightgrey" alt="MIT"/>
 </p>
@@ -22,20 +22,16 @@
 Most LLMs forget everything when the conversation ends.  
 `waggle-mcp` fixes that by giving your AI a **persistent knowledge graph** it can read and write through any MCP-compatible client.
 
+Waggle's key advantage is **token efficiency with structured context**:
+
 | Without waggle-mcp | With waggle-mcp |
 |--------------------------|----------------------|
-| "What did we decide about the DB schema?" → ❌ no idea | ✅ Recalls the decision node, when it was made, and what it contradicts |
-| Context stuffed into a 200k-token prompt | Compact subgraph — only relevant nodes retrieved |
+| Context stuffed into a 200k-token prompt | **~4× fewer tokens** — compact subgraph, only relevant nodes retrieved |
+| "What did we decide about the DB schema?" → ❌ Lost when the session ended | ✅ Recalls the decision node, when it was made, and what it contradicts |
 | Flat bullet-list memory | Typed edges: `relates_to`, `contradicts`, `depends_on`, `updates`… |
 | One session, one agent | Multi-tenant, multi-session, multi-agent |
 
----
-
-## Demo
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Abhigyan-Shekhar/graph-memory-mcp/main/assets/demo.svg" alt="waggle-mcp init demo" width="720"/>
-</p>
+> **Note on retrieval:** Waggle trades some raw recall coverage for dramatically lower token cost and richer relational context. See the [benchmark section](#performance--benchmarking) for honest numbers.
 
 ---
 
@@ -55,38 +51,6 @@ No cloud service. No API key. Semantic search runs fully locally.
 
 ---
 
-## How it works
-
-Memory doesn't just get stored — it flows through a lifecycle:
-
-```
-You talk to your AI
-        │
-        ▼
-  observe_conversation()          ← AI drops the turn in; facts are extracted via structured LLM (regex fallback)
-        │
-        ▼
-  Graph nodes are created         ← "Chose PostgreSQL" becomes a decision node
-  Edges are inferred              ← linked to the "database" entity node
-        │
-        ▼
-  Future conversation starts
-        │
-        ▼
-  query_graph("DB schema")        ← semantic search finds the node from 3 sessions ago
-        │
-        ▼
-  AI answers with full context    ← "You decided on PostgreSQL on Apr 10, here's why…"
-```
-
-Every node carries semantic embeddings computed **locally** using
-[`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) —
-a fast, lightweight model that runs entirely on-device with no API key or network
-call required. This means semantic search works offline, costs nothing per query,
-and keeps your data private.
-
----
-
 ## See it in action
 
 Here's a concrete before/after for a developer using the AI daily:
@@ -96,8 +60,8 @@ Here's a concrete before/after for a developer using the AI daily:
 User:  Let's use PostgreSQL. MySQL replication has been painful.
 Agent: [calls observe_conversation()]
        → stores decision node: "Chose PostgreSQL over MySQL"
-       → stores reason node: "MySQL replication painful"
-       → links them with depends_on edge
+       → stores reason node:   "MySQL replication painful"
+       → links them with a depends_on edge
 ```
 
 **Session 2** — April 12 (fresh context window, no history)
@@ -122,6 +86,38 @@ Agent: [calls store_node() + store_edge(new_node → old_node, "contradicts")]
 
 ---
 
+## How it works
+
+Memory doesn't just get stored — it flows through a lifecycle:
+
+```
+You talk to your AI
+        │
+        ▼
+  observe_conversation()          ← AI drops the turn in; facts extracted via structured LLM (regex fallback)
+        │
+        ▼
+  Graph nodes are created         ← "Chose PostgreSQL" becomes a decision node
+  Edges are inferred              ← linked to the "database" entity node
+        │
+        ▼
+  Future conversation starts
+        │
+        ▼
+  query_graph("DB schema")        ← semantic search finds the node from 3 sessions ago
+        │
+        ▼
+  AI answers with full context    ← "You decided on PostgreSQL on Apr 10, here's why…"
+```
+
+Every node carries semantic embeddings computed **locally** using
+[`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) —
+a fast, lightweight model that runs entirely on-device with no API key or network
+call required. This means semantic search works offline, costs nothing per query,
+and keeps your data private.
+
+---
+
 ## The magic tool: `observe_conversation`
 
 > **This is the tool you'll use most.** You don't have to manually store facts — just
@@ -139,16 +135,10 @@ Under the hood, it:
 
 No instructions needed. No schema to define. Just observe.
 
----
+Under the hood, every call runs a **Pydantic-validated LLM extraction pass** (with a regex fallback) to pull structured facts out of messy dialogue.
 
-## Fact Extraction Schema
+**Example:** `"Let's use PostgreSQL because MySQL replication is too painful."`
 
-When the agent observes a conversation, the backend runs a Pydantic-validated LLM extraction pass (or falls back to a regex engine) to pull structured facts out of messy dialogue.
-
-**Example Input:**
-> "Let's use PostgreSQL for the generic event storage because MySQL replication is too painful to manage."
-
-**Validated Output:**
 ```json
 {
   "facts": [
@@ -167,100 +157,12 @@ When the agent observes a conversation, the backend runs a Pydantic-validated LL
 
 ---
 
-## Performance & Comparisons
-
-### Micro-Benchmarks (Adversarial Dataset)
-
-We are finalizing a localized [micro-benchmark script](./scripts/benchmark_extraction.py) to evaluate a suite of highly-adversarial dialogues (including noisy interruptions, context-switching, and conflicting statements) to rigorously test bounds.
-
-*(Benchmarking dataset and empirical validations are currently being compiled. Preliminary baseline scripts are available in the repo, but formal numbers will be published shortly.)*
-
-| Task | Accuracy | Notes |
-|------|----------|-------|
-| **Structured Fact Extraction** | TBD | *Evaluating LLM extraction pipeline vs regex fallback baseline.* |
-| **Semantic Retrieval (Hit@5)** | TBD | *Evaluating using `all-MiniLM-L6-v2` against hard adversarial queries.* |
-| **Node Deduplication** | TBD | *Evaluating semantic node-merging to avoid duplicating the exact same knowledge.* |
-
-### Waggle vs. Standard Vector RAG (Token Efficiency)
-
-Unlike naive document chunk RAG (e.g., standard LangChain/LlamaIndex document stores), Waggle explicitly extracts and compacts granular graph nodes. This provides a massive token-efficiency and context-density advantage.
-
-*(Empirical benchmarking against LangChain VectorStore limits is currently underway.)*
-
-| System | Tokens per Prime | Retrieval Relevance | Context Window Waste |
-|--------|------------------|---------------------|----------------------|
-| **Naive Vector RAG** | TBD | TBD | High (entire document chunks retrieved) |
-| **Waggle Memory Graph** | **TBD** | **TBD** | **Near Zero** (only explicitly verified nodes/edges) |
-
-### When Extraction Fails
-
-*What happens when the user is too vague?*
-
-> **User:** "Yeah, let's just do that thing we talked about."
-
-*(Waggle LLM extraction pass runs...)*
-
-Because the statement is entirely ambiguous, the LLM assigns a low confidence (`confidence < 0.5`). Waggle **silently drops** the extraction to protect the graph integrity. It is architecturally safer to aggressively omit noisy extraction than to pollute the memory graph with hallucinatory, unanchored nodes.
-
-### Scaling to 10k+ Nodes
-
-Graph datasets grow iteratively. How does Waggle survive long-term memory accumulation across months of multi-agent sessions?
-
-1. **Local Embeddings Are Fast:** We map semantic embeddings using `all-MiniLM-L6-v2` locally. Embedding a query takes ~25ms. No network IO bottleneck.
-2. **Neo4j Enterprise Backing:** While the default is SQLite, production deployments switch seamlessly to Neo4j, ensuring constant-time edge traversals even at 1,000,000+ edges.
-3. **Biological Decay via `access_count`:** Old nodes that are rarely retrieved naturally decay in the `prime_context` sorting algorithm, while heavily relied-upon architectural decisions stay firmly anchored at the top.
-
----
-
-## Advanced Demo: Multi-Session Debugging
-
-Memory isn't just about simple recall; it's about context evolution and reasoning across time.
-
-**Session 1 (Monday)**
-*Agent investigates an auth timeout.*
-> **Agent:** Looks like the JWT tokens expire after 15 minutes, but the refresh logic has a race condition.
-> *(Waggle automatically extracts: `[Node: JWT 15m expiry]`, `[Node: Refresh logic race condition]`)*
-
-**Session 2 (Wednesday)**
-*User opens a fresh window with no chat history.*
-> **User:** We're seeing intermittent auth failures again.
-> **Agent:** *(Retrieves prime context)* This matches the race condition we discovered on Monday in the refresh logic. Let's look at that specific code path.
-> 
-> *Without Waggle, the agent wastes 10 minutes re-diagnosing the entire auth stack from scratch.*
-
-**Session 3 (Friday)**
-> **User:** We fixed the refresh race condition, but it feels like users are still getting kicked out too fast.
-> **Agent:** *(Queries graph)* Since we fixed the refresh issue, the problem might be the 15-minute aggressive expiry we noted on Monday. Should we extend that to 1 hour?
-
-The agent tracks the evolving state of the system across sessions, identifies contradictions, and leverages them to skip dead-end debugging branches.
-
----
-
-## Temporal queries — a solved problem most memory systems skip
-
-Most memory systems answer "what do you know about X?" — but can't answer
-*when* you learned it or how knowledge changed over time.
-
-`waggle-mcp` understands temporal natural language natively:
-
-| Query | What happens |
-|-------|-------------|
-| `query_graph("what did we decide recently")` | Filters nodes updated in the last 24–48h |
-| `query_graph("what was the original plan")` | Retrieves the earliest version of relevant nodes |
-| `query_graph("what changed last week")` | Returns a diff of nodes created/updated in that window |
-| `graph_diff(since="48h")` | Explicit changelog: added nodes, updated nodes, new conflicts |
-
-This is built on timestamped nodes + temporal phrase parsing — no vector-clock
-complexity, but enough to reconstruct a meaningful timeline of decisions.
-
----
-
 ## Memory model
 
 **Node types** — what gets stored:
 
 | Type | Example |
-|------|---------|
+|------|---------| 
 | `fact` | "The API uses JWT tokens" |
 | `preference` | "User prefers dark mode" |
 | `decision` | "Chose PostgreSQL over MySQL" |
@@ -281,7 +183,7 @@ complexity, but enough to reconstruct a meaningful timeline of decisions.
 
 | Tool | What it does |
 |------|-------------|
-| `observe_conversation` | **Drop a conversation turn in — facts extracted via structured LLM (regex fallback), stored, and linked** |
+| `observe_conversation` | **Drop a conversation turn in — facts extracted, stored, and linked** |
 | `query_graph` | Semantic + temporal search across the graph |
 | `store_node` | Manually save a fact, preference, decision, or note |
 | `store_edge` | Link two nodes with a typed relationship |
@@ -299,9 +201,194 @@ complexity, but enough to reconstruct a meaningful timeline of decisions.
 
 ---
 
+## Performance & Benchmarking
+
+All numbers below are reproducible from the checked-in fixtures in `benchmarks/fixtures/` using the harness at [`scripts/benchmark_extraction.py`](./scripts/benchmark_extraction.py). Saved output artifacts live in [`tests/artifacts/`](./tests/artifacts/README.md).
+
+**One command produces all the tables below** (extraction regex baseline, retrieval, dedup, and the comparative token-efficiency pilot):
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/benchmark_extraction.py \
+  --extraction-backend regex \
+  --systems waggle rag_naive \
+  --output tests/artifacts/benchmark_current.json
+```
+
+The LLM extraction row (75%) requires a separate run with a local Ollama instance — it is not included in `benchmark_current.json`:
+
+```bash
+# Requires Ollama running locally with qwen2.5:7b pulled
+PYTHONPATH=src .venv/bin/python scripts/benchmark_extraction.py \
+  --extraction-backend llm --ollama-model qwen2.5:7b --ollama-timeout-seconds 30
+```
+
+
+### Extraction accuracy
+
+Corpus: 12 dialogue pairs covering simple recall, interruptions, reversals, vague statements, and conflicting signals (`benchmarks/fixtures/extraction_cases.json`).
+
+| Backend | Cases | Accuracy |
+|---------|-------|----------|
+| Regex (fallback) | 12 | 33% |
+| LLM (`qwen2.5:7b`, 30 s timeout) | 12 | 75% |
+
+### Retrieval accuracy
+
+Corpus: 18 nodes, 18 queries — 6 easy (direct paraphrase) and 12 hard (adversarial: semantic generalization, temporal disambiguation, indirect domain translation, privacy framing). Source: `benchmarks/fixtures/retrieval_cases.json`.
+
+| Difficulty | Queries | Hit@k |
+|------------|---------|-------|
+| Easy | 6 | 6/6 = 100% |
+| Hard (adversarial) | 12 | 9/12 = 75% |
+| **Overall** | **18** | **15/18 = 83%** |
+
+### Token efficiency vs. naive chunked-vector RAG
+
+*The retrieval accuracy table above measures Waggle's standalone search quality. The comparison below uses a separate multi-session corpus designed to test token efficiency against a chunked-vector baseline.*
+
+Corpus: 24 multi-session scenarios, 66 retrieval queries across 7 task families (`benchmarks/fixtures/comparative_eval.json`).
+
+| Task family | Queries | Waggle Hit@k | RAG Hit@k |
+|-------------|---------|-------------|----------|
+| `factual_recall` | 18 | 18/18 = 100% | 100% |
+| `temporal_original` | 19 | 17/19 = 89% | 100% |
+| `multi_session_change` | 11 | 10/11 = 91% | 100% |
+| `cross_scenario_synthesis` | 8 | 8/8 = 100% | 100% |
+| `decision_delta` | 4 *(small n)* | 4/4 = 100% | 100% |
+| `adversarial_paraphrase` | 4 *(small n)* | 2/4 = 50% | 100% |
+| `temporal_latest` | 2 *(small n)* | 1/2 = 50% | 100% |
+| **Overall** | **66** | **60/66 = 91%** | **100%** |
+
+| System | Mean tokens | Median tokens | p95 tokens | Hit@k | Exact support |
+|--------|-------------|---------------|------------|-------|---------------|
+| **Waggle** | **36.9** | **37.0** | **42.0** | 91% | 74% |
+| Naive chunked-vector RAG | 152.8 | 155.0 | 162.8 | 100% | 100% |
+
+**Waggle uses ~4× fewer tokens per retrieval** than the naive chunked baseline on this corpus.
+
+The gap between Waggle's Hit@k (91%) and exact support (74%) indicates that graph retrieval finds the right topic but sometimes returns insufficient supporting detail — most visibly on `cross_scenario_synthesis` queries (8/8 hit, 1/8 exact). Improving context assembly — specifically edge traversal depth and multi-hop subgraph expansion — is a tracked next step.
+
+The tradeoff is honest: the chunked baseline achieves 100% Hit@k on this corpus because at `top_k=5` every fact is retrievable from its own session chunk. The token efficiency advantage is real and reproducible; the retrieval superiority claim requires a corpus where chunk coverage can't compensate for missing relational context. Corpus hardening is ongoing.
+
+
+### When extraction fails
+
+> **User:** "Yeah, let's just do that thing we talked about."
+
+The LLM assigns low confidence (`confidence < 0.5`) to ambiguous input; Waggle **drops the extraction silently** rather than storing a guess. The pipeline does **not** silently fall back to regex on timeout — backend failures surface as explicit errors that are logged.
+
+<details>
+<summary>Deduplication results (22-pair fixture — click to expand)</summary>
+
+Corpus: 22 node pairs — 11 true duplicates (synonym, paraphrase, domain equivalence) and 11 false friends (same technology category, different technology). Source: `benchmarks/fixtures/dedup_cases.json`.
+
+The pipeline runs five layers:
+1. **Layer 0 — Entity-key hard block** — if both nodes name *different* technologies in the *same* category (e.g. `postgresql` vs `mysql`), merge is blocked unconditionally.
+2. **Layer 0b — Numeric-conflict guard** — same entity but *different critical numbers* (e.g. `jwt` 15 min vs 1 hr) → block. Guards against merging distinct facts that share a technology but differ on a key value.
+3. **Layer 1 — Exact string match** — normalized content or label equality.
+4. **Layer 2 — Substring containment** — one sentence is a strict subset of the other.
+5. **Layer 3 — Semantic similarity** — cosine via `all-MiniLM-L6-v2`:
+   - Same-entity aggressive path: if both reference the **same** entity token, merge at cosine ≥ 0.60 (catches paraphrase true-dups like "fastapi was chosen" / "we chose fastapi because async")
+   - Type-aware threshold: `decision`/`preference` → 0.82; `fact` → 0.92; `entity` → 0.97
+   - Jaccard-boosted path: word overlap ≥ 0.35 AND cosine ≥ (type threshold − 0.05)
+   - Conservative global fallback
+
+Best measured: **18/22 = 82%** at threshold 0.82. **fp=0 across all thresholds** — no false-friend merges at any tested threshold.
+
+The remaining 4 false-negatives are pure-paraphrase pairs with no recognisable entity anchor ("user prefers dark mode" / "user wants dark mode UI", "async non-negotiable" / "concurrent without blocking"). These require either semantic similarity fine-tuning or a learned paraphrase classifier to close.
+
+Full threshold sweep and detailed methodology: [`tests/artifacts/README.md`](./tests/artifacts/README.md).
+
+</details>
+
+> Full artifacts, methodology, and rag_tuned comparison: [`tests/artifacts/README.md`](./tests/artifacts/README.md)  
+> Improvement roadmap (dedup → context assembly → corpus hardening): [`docs/evaluation-plan.md`](./docs/evaluation-plan.md)
+
+
+
+---
+
+## Temporal queries — built-in, not bolted on
+
+Most memory systems answer "what do you know about X?" — but can't answer
+*when* you learned it or how knowledge changed over time.
+
+`waggle-mcp` timestamps every node and understands temporal natural language:
+
+| Query | What happens |
+|-------|-------------|
+| `query_graph("what did we decide recently")` | Filters nodes updated in the last 24–48h |
+| `query_graph("what was the original plan")` | Retrieves the earliest version of relevant nodes |
+| `query_graph("what changed last week")` | Returns a diff of nodes created/updated in that window |
+| `graph_diff(since="48h")` | Explicit changelog: added nodes, updated nodes, new conflicts |
+
+---
+
+## Testing
+
+Beyond empirical benchmarks, `waggle-mcp` ships with a comprehensive pytest suite covering both memory logic and server protocols. This guarantees core behaviours — multi-tenant isolation, conflict detection, semantic deduplication, MCP protocol handling, and explicit LLM backend failure — remain stable across updates.
+
+<details>
+<summary>View the 43 component and integration tests (click to expand)</summary>
+
+```text
+============================= test session starts ==============================
+collected 43 items                                                             
+
+tests/test_benchmark_harness.py::test_fixture_loading_is_auditable PASSED
+tests/test_benchmark_harness.py::test_benchmark_report_includes_backend_labels_and_case_counts PASSED
+tests/test_benchmark_harness.py::test_markdown_summary_includes_comparative_systems PASSED
+tests/test_benchmark_harness.py::test_llm_benchmark_failure_is_explicit PASSED
+tests/test_benchmark_harness.py::test_dedup_threshold_sweep_tracks_positive_and_negative_cases PASSED
+tests/test_embeddings.py::test_embedding_bytes_round_trip PASSED
+tests/test_embeddings.py::test_cosine_similarity_handles_orthogonal_vectors PASSED
+tests/test_graph.py::test_add_query_and_related PASSED
+tests/test_graph.py::test_update_delete_and_stats PASSED
+tests/test_graph.py::test_exact_duplicate_nodes_are_reused_and_tags_are_merged PASSED
+tests/test_graph.py::test_semantic_duplicate_nodes_reuse_existing_entry PASSED
+tests/test_graph.py::test_entity_resolution_reuses_acronym_matches PASSED
+tests/test_graph.py::test_query_ranking_uses_label_lexical_overlap PASSED
+tests/test_graph.py::test_decompose_and_store_creates_nodes_and_edges PASSED
+tests/test_graph.py::test_export_and_import_backup_round_trip PASSED
+tests/test_graph.py::test_export_graph_html_creates_visualization_file PASSED
+tests/test_graph.py::test_conflict_detection_creates_contradiction_edge PASSED
+tests/test_graph.py::test_observe_conversation_extracts_nodes PASSED
+tests/test_graph.py::test_query_supports_temporal_latest_and_oldest_bias PASSED
+tests/test_graph.py::test_graph_diff_and_prime_context PASSED
+tests/test_graph.py::test_get_topics_returns_clusters PASSED
+tests/test_platform.py::test_api_key_hashing_round_trip PASSED
+tests/test_platform.py::test_rate_limiter_enforces_request_and_concurrency_limits PASSED
+tests/test_platform.py::test_tenant_scoping_isolated_within_same_sqlite_database PASSED
+tests/test_platform.py::test_backup_round_trip_preserves_schema_and_tenant_metadata PASSED
+tests/test_platform.py::test_http_app_health_auth_and_metrics PASSED
+tests/test_platform.py::test_http_app_rate_limit_and_payload_limit PASSED
+tests/test_server.py::test_store_node_and_stats_tool PASSED
+tests/test_server.py::test_export_graph_html_tool PASSED
+tests/test_server.py::test_decompose_and_store_tool_persists_subgraph PASSED
+tests/test_server.py::test_export_and_import_backup_tools PASSED
+tests/test_server.py::test_store_node_reports_deduplication PASSED
+tests/test_server.py::test_store_node_reports_conflicts PASSED
+tests/test_server.py::test_observe_conversation_tool PASSED
+tests/test_server.py::test_graph_diff_prime_context_and_topics_tools PASSED
+tests/test_server.py::test_recent_resource_serialization PASSED
+tests/test_server.py::test_unknown_tool_raises PASSED
+tests/test_server.py::test_invalid_tool_inputs_return_structured_errors PASSED
+tests/test_server.py::test_tool_payload_limit_is_enforced PASSED
+tests/test_server.py::test_default_graph_uses_sqlite_backend_by_default PASSED
+tests/test_server.py::test_default_graph_can_build_neo4j_backend PASSED
+tests/test_server.py::test_default_graph_requires_neo4j_connection_settings PASSED
+tests/test_stdio_integration.py::test_server_stdio_initialize_and_basic_calls PASSED
+
+============================== 43 passed in 4.92s ==============================
+```
+</details>
+
+---
+
 ## Installation
 
-### Local / development (SQLite, no extra services)
+<details>
+<summary>Local / development (SQLite, no extra services)</summary>
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -309,7 +396,7 @@ pip install -e ".[dev]"
 waggle-mcp init        # ← writes your client config automatically
 ```
 
-Three key variables for local mode:
+Key variables for local mode:
 
 | Variable | What it does |
 |----------|-------------|
@@ -317,15 +404,14 @@ Three key variables for local mode:
 | `WAGGLE_TRANSPORT=stdio` | Connects to desktop MCP clients |
 | `WAGGLE_DB_PATH` | Where the graph is stored (default: `memory.db`) |
 
-### Production (Neo4j backend)
+</details>
+
+<details>
+<summary>Production (Neo4j backend)</summary>
 
 ```bash
 pip install -e ".[dev,neo4j]"
-```
 
-Then run the server:
-
-```bash
 WAGGLE_TRANSPORT=http \
 WAGGLE_BACKEND=neo4j \
 WAGGLE_DEFAULT_TENANT_ID=workspace-default \
@@ -335,7 +421,10 @@ WAGGLE_NEO4J_PASSWORD=change-me \
 waggle-mcp
 ```
 
-### Docker
+</details>
+
+<details>
+<summary>Docker</summary>
 
 ```bash
 docker build -t waggle-mcp:latest .
@@ -350,13 +439,12 @@ docker run --rm -p 8080:8080 \
   waggle-mcp:latest
 ```
 
----
+</details>
 
-## Manual client configuration
+<details>
+<summary>Manual client configuration</summary>
 
-If you prefer to edit config files directly, or `init` doesn't cover your client:
-
-### Claude Desktop — `claude_desktop_config.json`
+**Claude Desktop — `claude_desktop_config.json`**
 
 ```json
 {
@@ -377,7 +465,7 @@ If you prefer to edit config files directly, or `init` doesn't cover your client
 }
 ```
 
-### Codex — `codex_config.toml`
+**Codex — `codex_config.toml`**
 
 ```toml
 [mcp_servers.waggle]
@@ -395,6 +483,8 @@ env     = {
 ```
 
 A pre-filled example is in [`codex_config.example.toml`](./codex_config.example.toml).
+
+</details>
 
 ---
 
@@ -441,11 +531,22 @@ A pre-filled example is in [`codex_config.example.toml`](./codex_config.example.
 | `WAGGLE_NEO4J_PASSWORD` | Neo4j password |
 | `WAGGLE_NEO4J_DATABASE` | Neo4j database name |
 
+### LLM Extraction
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WAGGLE_EXTRACT_BACKEND` | `auto` | `auto` \| `llm` \| `regex` |
+| `WAGGLE_EXTRACT_MODEL` | `mistral` | Ollama model name |
+| `WAGGLE_EXTRACT_MIN_CONFIDENCE` | `0.5` | float 0–1, facts below this are dropped |
+| `WAGGLE_OLLAMA_URL` | `http://localhost:11434` | Base URL for local Ollama |
+| `WAGGLE_OLLAMA_TIMEOUT_SECONDS` | `15` | Timeout in seconds for Ollama requests; used by extractor and benchmark harness |
+
 </details>
 
 ---
 
-## Admin commands
+<details>
+<summary>Admin commands</summary>
 
 ```bash
 # Create a tenant
@@ -466,9 +567,10 @@ WAGGLE_NEO4J_USERNAME=neo4j WAGGLE_NEO4J_PASSWORD=change-me \
   waggle-mcp migrate-sqlite --db-path ./memory.db --tenant-id workspace-a
 ```
 
----
+</details>
 
-## Kubernetes & observability
+<details>
+<summary>Kubernetes & observability</summary>
 
 Full production deployment assets are in [`deploy/`](./deploy/):
 
@@ -476,10 +578,6 @@ Full production deployment assets are in [`deploy/`](./deploy/):
 |------|--------------|
 | `deploy/kubernetes/` | Deployment, Service, Ingress (TLS), NetworkPolicy, HPA, PDB, cert-manager, ExternalSecrets — see [`deploy/kubernetes/README.md`](./deploy/kubernetes/README.md) |
 | `deploy/observability/` | Prometheus scrape config, Grafana dashboard, one-command Docker Compose observability stack |
-
----
-
-## Runbooks
 
 Operational runbooks are in [`docs/runbooks/`](./docs/runbooks/):
 
@@ -489,29 +587,10 @@ Operational runbooks are in [`docs/runbooks/`](./docs/runbooks/):
 - [Tenant onboarding](./docs/runbooks/onboarding.md) — new tenant checklist
 - [Secret management](./docs/runbooks/secret-management.md) — External Secrets + cert-manager
 
----
+</details>
 
-## Testing
-
-```bash
-.venv/bin/pytest -q
-```
-
-Coverage: graph CRUD, deduplication, conflict detection, tenant isolation,
-backup/import, stdio MCP, HTTP auth/health/metrics, payload limits.
-
-```bash
-# End-to-end backup/restore drill
-WAGGLE_HOST=http://localhost:8080 WAGGLE_API_KEY=<key> \
-  ./scripts/backup_restore_drill.sh
-
-# Load test (p50/p95/p99 latency report)
-WAGGLE_API_KEY=<key> ./scripts/load_test.sh --medium
-```
-
----
-
-## Architecture
+<details>
+<summary>Architecture & project layout</summary>
 
 ```
 waggle-mcp
@@ -524,26 +603,37 @@ waggle-mcp
 - Local/dev → SQLite (zero config, instant start)
 - Production → Neo4j (`WAGGLE_TRANSPORT=http` requires `WAGGLE_BACKEND=neo4j`)
 
----
-
-## Project layout
-
 ```
 waggle-mcp/
 ├── assets/                   ← banner + demo SVG
+├── benchmarks/fixtures/      ← checked-in eval datasets
 ├── deploy/
 │   ├── kubernetes/           ← full K8s manifests + guide
 │   └── observability/        ← Prometheus + Grafana stack
 ├── docs/runbooks/            ← operational runbooks
 ├── scripts/
+│   ├── benchmark_extraction.py
 │   ├── load_test.py / .sh
 │   └── backup_restore_drill.py / .sh
 ├── src/waggle/         ← server, graph, neo4j_graph, auth, config …
-├── tests/
+├── tests/artifacts/    ← saved benchmark runs
 ├── Dockerfile
 ├── pyproject.toml
 └── README.md
 ```
+
+</details>
+
+---
+
+## Running tests
+
+```bash
+.venv/bin/pytest -q
+```
+
+Coverage: graph CRUD, deduplication, conflict detection, tenant isolation,
+backup/import, stdio MCP, HTTP auth/health/metrics, payload limits.
 
 ---
 

@@ -13,3 +13,5 @@ exports/
 .dual-graph-context/
 CODEX.md
 bmsce-date/
+scripts/benchmark_results.json
+benchmarks/output/

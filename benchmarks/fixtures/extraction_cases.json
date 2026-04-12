@@ -1,0 +1,76 @@
+[
+  {
+    "name": "postgres_decision_simple",
+    "user_message": "Let's use PostgreSQL. MySQL replication has been painful.",
+    "assistant_response": "Sure, I'll update the stack to use PostgreSQL.",
+    "expected_node_types": ["decision"]
+  },
+  {
+    "name": "dark_mode_preference",
+    "user_message": "I prefer dark mode everywhere.",
+    "assistant_response": "Noted, I'll keep that in mind.",
+    "expected_node_types": ["preference"]
+  },
+  {
+    "name": "jwt_expiry_fact",
+    "user_message": "The JWT tokens expire after 15 minutes.",
+    "assistant_response": "Got it. I'll document that in the auth spec.",
+    "expected_node_types": ["fact"]
+  },
+  {
+    "name": "question_and_decision_mixed_signal",
+    "user_message": "Should we use GraphQL instead of REST?",
+    "assistant_response": "Let's stay with REST because the mobile clients only need two stable endpoints.",
+    "expected_node_types": ["question", "decision"],
+    "min_type_matches": 2
+  },
+  {
+    "name": "assistant_supplies_memory_worthy_fact",
+    "user_message": "We keep getting logged out unexpectedly.",
+    "assistant_response": "The refresh token rotation has a race condition and the JWT expiry is still 15 minutes.",
+    "expected_node_types": ["fact"]
+  },
+  {
+    "name": "interrupted_reversal",
+    "user_message": "Ignore the earlier cache note. We are using Redis, not Memcached, for session storage.",
+    "assistant_response": "Understood. I'll treat Redis as the final cache decision.",
+    "expected_node_types": ["decision"]
+  },
+  {
+    "name": "conflicting_statement_with_final_choice",
+    "user_message": "We were on SQLite before, but the final decision is PostgreSQL for production.",
+    "assistant_response": "I'll record PostgreSQL as the active database decision.",
+    "expected_node_types": ["decision"]
+  },
+  {
+    "name": "vague_statement_should_drop",
+    "user_message": "Yeah, let's just do that thing we talked about.",
+    "assistant_response": "Okay.",
+    "expected_node_types": []
+  },
+  {
+    "name": "nextjs_reversal",
+    "user_message": "I thought React SPA was the plan, but let's stick with Next.js.",
+    "assistant_response": "Sounds good. I'll keep the app on Next.js.",
+    "expected_node_types": ["decision"]
+  },
+  {
+    "name": "python_team_preference",
+    "user_message": "The team is strongest in Python, so let's keep the backend Python-first.",
+    "assistant_response": "Agreed. We'll avoid a Node backend rewrite.",
+    "expected_node_types": ["preference"]
+  },
+  {
+    "name": "noise_and_interruption",
+    "user_message": "Uh, one more thing before I forget: the API rate limit is 120 requests per minute.",
+    "assistant_response": "Noted. I'll include the 120 rpm limit in the gateway notes.",
+    "expected_node_types": ["fact"]
+  },
+  {
+    "name": "question_only_case",
+    "user_message": "What was the reason we dropped SQLite?",
+    "assistant_response": "We moved to Neo4j because SQLite doesn't support concurrent writes well.",
+    "expected_node_types": ["question", "decision"],
+    "min_type_matches": 2
+  }
+]

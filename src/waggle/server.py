@@ -1204,7 +1204,8 @@ def main() -> None:
         sys.exit(_run_init())
 
     config = AppConfig.from_env()
-    configure_logging(config.log_level)
+    log_stream = sys.stderr if config.transport == "stdio" else sys.stdout
+    configure_logging(config.log_level, stream=log_stream)
     LOGGER.info("waggle_startup")
     if command != "serve":
         _run_admin_command(config, args)

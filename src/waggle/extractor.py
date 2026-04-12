@@ -10,6 +10,7 @@ Environment variables:
     WAGGLE_EXTRACT_MODEL    = ollama model name    (default: mistral)
     WAGGLE_EXTRACT_MIN_CONFIDENCE = float 0-1      (default: 0.5)
     WAGGLE_OLLAMA_URL       = ollama base URL       (default: http://localhost:11434)
+    WAGGLE_OLLAMA_TIMEOUT_SECONDS = request timeout in seconds (default: 15)
 """
 from __future__ import annotations
 
@@ -35,6 +36,11 @@ EXTRACT_BACKEND: Literal["auto", "llm", "regex"] = os.getenv("WAGGLE_EXTRACT_BAC
 EXTRACT_MODEL = os.getenv("WAGGLE_EXTRACT_MODEL", "mistral")
 MIN_CONFIDENCE = float(os.getenv("WAGGLE_EXTRACT_MIN_CONFIDENCE", "0.5"))
 OLLAMA_URL = os.getenv("WAGGLE_OLLAMA_URL", "http://localhost:11434")
+
+try:
+    OLLAMA_TIMEOUT_SECONDS = float(os.getenv("WAGGLE_OLLAMA_TIMEOUT_SECONDS", "15"))
+except (ValueError, TypeError):
+    OLLAMA_TIMEOUT_SECONDS = 15.0
 
 # ---------------------------------------------------------------------------
 # Pydantic output schema
@@ -166,7 +172,7 @@ Return JSON:
 {{"facts": [{{"label": "...", "content": "...", "node_type": "...", "confidence": 0.0, "tags": []}}]}}"""
 
 
-def _call_ollama(prompt: str, model: str, url: str) -> str | None:
+def _call_ollama(prompt: str, model: str, url: str, timeout_seconds: float) -> str | None:
     """POST to local Ollama and return the raw response string, or None on error."""
     payload = json.dumps({
         "model": model,
@@ -182,11 +188,11 @@ def _call_ollama(prompt: str, model: str, url: str) -> str | None:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             data = json.loads(resp.read())
             return data.get("response", "")
     except Exception as exc:
-        log.debug("Ollama unavailable (%s): %s", url, exc)
+        log.debug("Ollama unavailable (%s, timeout=%ss): %s", url, timeout_seconds, exc)
         return None
 
 
@@ -208,6 +214,7 @@ def extract_with_llm(
     model: str = EXTRACT_MODEL,
     min_confidence: float = MIN_CONFIDENCE,
     ollama_url: str = OLLAMA_URL,
+    timeout_seconds: float = OLLAMA_TIMEOUT_SECONDS,
 ) -> list[dict] | None:
     """
     Extract structured facts using a local Ollama LLM with Pydantic validation.
@@ -227,7 +234,7 @@ def extract_with_llm(
         )
     )
 
-    raw = _call_ollama(prompt, model, ollama_url)
+    raw = _call_ollama(prompt, model, ollama_url, timeout_seconds)
     if raw is None:
         return None  # signal caller: use regex fallback
 

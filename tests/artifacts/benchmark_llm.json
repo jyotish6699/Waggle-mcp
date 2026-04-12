@@ -1,0 +1,175 @@
+{
+  "fixtures": {
+    "directory": "benchmarks/fixtures",
+    "extraction_cases": 12,
+    "retrieval_nodes": 8,
+    "retrieval_queries": 6,
+    "dedup_cases": 6
+  },
+  "metrics": [
+    {
+      "metric": "extraction",
+      "backend": "llm",
+      "passed": 9,
+      "total": 12,
+      "accuracy": 0.75,
+      "case_count": 12,
+      "metadata": {
+        "model": "qwen2.5:7b",
+        "ollama_url": "http://localhost:11434",
+        "timeout_seconds": 30.0
+      }
+    },
+    {
+      "metric": "retrieval",
+      "backend": "semantic-query",
+      "passed": 5,
+      "total": 6,
+      "accuracy": 0.8333333333333334,
+      "case_count": 6,
+      "metadata": {
+        "corpus_nodes": 8,
+        "top_k": 5
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 3,
+      "total": 6,
+      "accuracy": 0.5,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.97,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 3,
+        "false_positives": 0,
+        "false_negatives": 3
+      }
+    }
+  ],
+  "errors": [],
+  "threshold_sweep": [
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 3,
+      "total": 6,
+      "accuracy": 0.5,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.82,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 1,
+        "true_negatives": 2,
+        "false_positives": 1,
+        "false_negatives": 2
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 2,
+      "total": 6,
+      "accuracy": 0.3333333333333333,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.85,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 2,
+        "false_positives": 1,
+        "false_negatives": 3
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 2,
+      "total": 6,
+      "accuracy": 0.3333333333333333,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.88,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 2,
+        "false_positives": 1,
+        "false_negatives": 3
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 2,
+      "total": 6,
+      "accuracy": 0.3333333333333333,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.9,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 2,
+        "false_positives": 1,
+        "false_negatives": 3
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 2,
+      "total": 6,
+      "accuracy": 0.3333333333333333,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.92,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 2,
+        "false_positives": 1,
+        "false_negatives": 3
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 3,
+      "total": 6,
+      "accuracy": 0.5,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.95,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 3,
+        "false_positives": 0,
+        "false_negatives": 3
+      }
+    },
+    {
+      "metric": "deduplication",
+      "backend": "semantic-dedup",
+      "passed": 3,
+      "total": 6,
+      "accuracy": 0.5,
+      "case_count": 6,
+      "metadata": {
+        "threshold": 0.97,
+        "positive_cases": 3,
+        "negative_cases": 3,
+        "true_positives": 0,
+        "true_negatives": 3,
+        "false_positives": 0,
+        "false_negatives": 3
+      }
+    }
+  ]
+}

@@ -87,25 +87,70 @@ _DOMAIN_HINT_TOKENS = {
     "framework",
 }
 _CHOICE_CATEGORY_BY_TOKEN = {
+    # API styles
     "rest": "api-style",
     "graphql": "api-style",
     "grpc": "api-style",
     "soap": "api-style",
+    "trpc": "api-style",
+    # Databases / stores
     "sqlite": "database",
     "postgres": "database",
     "postgresql": "database",
     "mysql": "database",
+    "mariadb": "database",
     "mongodb": "database",
     "neo4j": "database",
     "redis": "database",
+    "memcached": "database",
+    "cassandra": "database",
+    "dynamodb": "database",
+    "firestore": "database",
+    "cockroachdb": "database",
+    "clickhouse": "database",
+    # Backend frameworks
     "fastapi": "backend-framework",
     "django": "backend-framework",
     "flask": "backend-framework",
     "express": "backend-framework",
     "nestjs": "backend-framework",
+    "rails": "backend-framework",
+    "spring": "backend-framework",
+    "gin": "backend-framework",
+    "fiber": "backend-framework",
+    # Frontend frameworks
     "react": "frontend-framework",
     "vue": "frontend-framework",
     "svelte": "frontend-framework",
+    "angular": "frontend-framework",
+    "nextjs": "frontend-framework",
+    "nuxt": "frontend-framework",
+    # Auth
+    "jwt": "auth-mechanism",
+    "oauth": "auth-mechanism",
+    "saml": "auth-mechanism",
+    "session": "auth-mechanism",
+    "cookie": "auth-mechanism",
+    "apikey": "auth-mechanism",
+    # Deployment
+    "kubernetes": "deployment",
+    "docker": "deployment",
+    "heroku": "deployment",
+    "lambda": "deployment",
+    "fargate": "deployment",
+    "cloudrun": "deployment",
+    # Queues / messaging
+    "kafka": "message-queue",
+    "rabbitmq": "message-queue",
+    "sqs": "message-queue",
+    "pubsub": "message-queue",
+    "nats": "message-queue",
+    # Embedding / ML
+    "miniLM": "embedding-model",
+    "minilm": "embedding-model",
+    "ada": "embedding-model",
+    "openai": "embedding-model",
+    "cohere": "embedding-model",
 }
 
 
@@ -120,12 +165,113 @@ def normalize_text(value: str) -> str:
     return " ".join(value.lower().split())
 
 
+def content_token_jaccard(a: str, b: str) -> float:
+    """Bag-of-content-words Jaccard similarity, stopwords excluded.
+
+    Returns a value in [0, 1]. A score >= 0.5 strongly indicates the two texts
+    are talking about the same thing even when phrased differently.
+    Used as a cheap pre-filter before cosine similarity.
+    """
+    tokens_a = tokenize_text(a)
+    tokens_b = tokenize_text(b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+# Per-type thresholds reflect semantic risk:
+# - decision/preference nodes are high-confidence, narrow-topic — merge aggressively
+# - fact nodes carry precise numeric/technical values — merge conservatively
+# - concept/entity are structural anchors — be very conservative
+_TYPE_DEDUP_THRESHOLD: dict[NodeType, float] = {
+    NodeType.DECISION:   0.82,
+    NodeType.PREFERENCE: 0.82,
+    NodeType.NOTE:       0.85,
+    NodeType.QUESTION:   0.88,
+    NodeType.FACT:       0.92,
+    NodeType.CONCEPT:    0.95,
+    NodeType.ENTITY:     0.97,
+}
+
+
+def type_aware_dedup_threshold(node_type: NodeType, *, default: float = 0.97) -> float:
+    """Return a per-type cosine similarity threshold for deduplication.
+
+    Lower values merge more aggressively. Higher values are more conservative.
+    Falls back to *default* if the type has no explicit mapping.
+    """
+    return _TYPE_DEDUP_THRESHOLD.get(node_type, default)
+
+
+def extract_choice_entity(text: str) -> tuple[str, str] | None:
+    """Extract the dominant named technology/entity from *text*.
+
+    Returns ``(entity_token, category)`` if a known entity is found, or
+    ``None`` if the text contains no recognised technology token.
+
+    Used as a **hard merge gate** in deduplication: if two nodes reference
+    *different* entities in the *same* category (e.g. "postgresql" vs "mysql"
+    both in "database"), they must NOT be merged regardless of cosine score.
+
+    Examples::
+
+        extract_choice_entity("We decided to use PostgreSQL")
+        # → ("postgresql", "database")
+
+        extract_choice_entity("MySQL replication is painful")
+        # → ("mysql", "database")
+
+        extract_choice_entity("The team prefers async support")
+        # → None  (no recognisable technology token)
+    """
+    tokens = [t.lower() for t in _TOKEN_RE.findall(text)]
+    matches: list[tuple[str, str]] = []
+
+    # First pass: check individual tokens
+    for token in tokens:
+        category = _CHOICE_CATEGORY_BY_TOKEN.get(token)
+        if category is not None:
+            matches.append((token, category))
+
+    # Second pass: check concatenated multi-token forms (e.g., "Next.js" → "nextjs")
+    for i in range(len(tokens)):
+        for j in range(i + 1, min(i + 4, len(tokens) + 1)):  # Check up to 3-token combinations
+            combined = "".join(tokens[i:j])
+            category = _CHOICE_CATEGORY_BY_TOKEN.get(combined)
+            if category is not None:
+                matches.append((combined, category))
+
+    if not matches:
+        return None
+
+    # Return the last match (handles reversal sentences correctly)
+    return matches[-1]
+
+
 def tokenize_text(value: str) -> set[str]:
     return {
         token
         for token in _TOKEN_RE.findall(normalize_text(value))
         if token and token not in _STOPWORDS and len(token) > 1
     }
+
+
+_NUMERIC_RE = re.compile(r"\b\d+\b")
+
+
+def contains_conflicting_numbers(a: str, b: str) -> bool:
+    """Return True if *a* and *b* each contain numbers AND their number sets differ.
+
+    Guards against merging same-entity nodes that differ only on a critical
+    numeric value — e.g. "JWT tokens expire after 15 minutes" vs "JWT tokens
+    expire after 1 hour". If the numbers agree (or neither has numbers), this
+    returns False and the normal merge logic proceeds.
+    """
+    nums_a = set(_NUMERIC_RE.findall(a))
+    nums_b = set(_NUMERIC_RE.findall(b))
+    if not nums_a or not nums_b:
+        return False
+    return nums_a != nums_b
 
 
 def label_similarity(left: str, right: str) -> float:
