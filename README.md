@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <strong>Persistent, structured memory for AI agents — typically lower-token than chunk-based retrieval, often 2-4× on factual lookups.</strong><br/>
-  Your LLM remembers facts, decisions, and context <em>across every conversation</em>, backed by a real knowledge graph.
+  <strong>Your AI forgets everything between sessions. Waggle gives it a graph-backed brain.</strong><br/>
+  Persistent, structured memory for AI agents — typically lower-token than chunk-based retrieval, often 2-4× on factual lookups.
 </p>
 
 <p align="center">
@@ -99,11 +99,7 @@ Manual MCP setup examples for **Codex**, **Claude Code**, **Cursor**, and **Anti
 
 > **One-time install:** `pip install waggle-mcp` — no API key, no cloud account, no Docker required for local use.
 
-Pick your client below, paste the config, and restart. That's it.
-
-### Antigravity
-
-Open the agent panel → `···` menu → **Manage MCP Servers** → **View raw config**, then add:
+Use this shared JSON config shape for clients that accept `mcpServers` JSON:
 
 ```json
 {
@@ -123,32 +119,24 @@ Open the agent panel → `···` menu → **Manage MCP Servers** → **View raw
 }
 ```
 
-### Claude Desktop
+<details>
+<summary>Claude Desktop / Antigravity / Cursor / Claude Code setup details</summary>
 
-Config file location:
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+**Claude Desktop config file location**
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 
-```json
-{
-  "mcpServers": {
-    "waggle": {
-      "command": "python",
-      "args": ["-m", "waggle.server"],
-      "env": {
-        "WAGGLE_TRANSPORT": "stdio",
-        "WAGGLE_BACKEND": "sqlite",
-        "WAGGLE_DB_PATH": "~/.waggle/memory.db",
-        "WAGGLE_DEFAULT_TENANT_ID": "local-default",
-        "WAGGLE_MODEL": "all-MiniLM-L6-v2"
-      }
-    }
-  }
-}
-```
+**Antigravity**
+- Open agent panel → `···` → **Manage MCP Servers** → **View raw config**
+- Paste the same JSON block above.
 
-### Claude Code
+**Cursor**
+- `Cursor Settings -> Features -> MCP Servers -> + Add`
+- Command: `python`
+- Args: `-m waggle.server`
+- Env vars: same keys as the JSON block above.
 
+**Claude Code**
 ```bash
 claude mcp add waggle \
   --env WAGGLE_TRANSPORT=stdio \
@@ -159,14 +147,7 @@ claude mcp add waggle \
   -- python -m waggle.server
 ```
 
-### Cursor
-
-`Cursor Settings → Features → MCP Servers → + Add`:
-- **Command:** `python`
-- **Args:** `-m waggle.server`
-- **Env vars:** same block as Claude Desktop above
-
-Or drop a `.cursor/mcp.json` at the project root using the same `mcpServers` JSON shape.
+</details>
 
 ### Codex
 
@@ -232,41 +213,11 @@ For the full tool surface and environment variable reference see [docs/reference
 
 ## Using It In MCP Clients
 
-Once Waggle is installed in an MCP client, people normally do not run `waggle-mcp` commands by hand during everyday use. They talk to the agent normally, and the agent uses Waggle's MCP tools to store and retrieve memory.
+Once installed, you usually do not run `waggle-mcp` commands by hand during daily work. Talk to the agent normally, and it calls Waggle MCP tools to store and retrieve memory.
 
-### Codex
-
-Typical pattern:
-- You work in a normal Codex thread.
-- Codex calls `observe_conversation`, `store_node`, `store_edge`, `query_graph`, or `prime_context` when memory is useful.
-- On a later task, Codex can pull back the connected subgraph instead of relying on the current chat window alone.
-
-Example:
-- You say: `Remember that we chose PostgreSQL because MySQL replication was painful.`
-- Codex stores that as structured memory.
-- Days later you ask: `What did we decide about the database?`
-- Codex can call `query_graph` and recover the earlier decision plus its reason.
-
-### Claude Code
-
-Typical pattern:
-- You configure Waggle as an MCP server in Claude Code.
-- Claude Code uses Waggle tools to persist decisions, preferences, architecture notes, and project state across sessions.
-- `prime_context` and `export_context_bundle` are useful when starting a fresh task or handing context to another model.
-
-### Cursor
-
-Typical pattern:
-- Cursor uses Waggle over MCP while you work in the editor.
-- Facts and decisions can be saved as graph memory instead of getting lost in past chats.
-- Later questions like `why did we change this?` or `what superseded this decision?` can be answered from connected nodes and edges.
-
-### Antigravity
-
-Typical pattern:
-- Antigravity can use Waggle as its persistent memory backend through MCP.
-- Conversation turns can be extracted with `observe_conversation`.
-- Linked context can be exported with `export_context_bundle` or edited through the Markdown vault workflow.
+- **Codex / Claude Code**: `observe_conversation`, `query_graph`, and `prime_context` are called automatically during normal threads.
+- **Cursor**: decisions and facts can be persisted as graph memory instead of getting lost in old chat windows.
+- **Antigravity**: conversation turns can be extracted via `observe_conversation`; context can be exported with `export_context_bundle`.
 
 For a built-in CLI explanation of the feature surface, run:
 
@@ -408,6 +359,8 @@ Notes:
 
 Sources: [performance_snapshot.md](./tests/artifacts/verification/2026-04-20-performance-snapshot/performance_snapshot.md), [benchmark_current.md](./tests/artifacts/benchmark_current.md)
 
+> **Example:** Retrieving a database decision stored days ago uses about `56` tokens from a Waggle subgraph vs about `150` tokens from naive context replay (`~2.7x` lower-token).
+
 ---
 
 ## Benchmarks & Verification
@@ -424,6 +377,17 @@ LongMemEval session-retrieval results (500 questions):
 `Exact@5` is stricter than R@5 and is included here to show precision on support-session retrieval, not just any top-5 hit.
 
 **Important:** on the current saved artifacts, raw retrieval outperforms hybrid reranking on both R@5 and Exact@5. We are treating this as a tuning target for `v0.1.8` rather than changing defaults to a weaker mode.
+
+### Cross-Project Context (LongMemEval, session retrieval)
+
+| System | R@5 | Notes |
+|------|-----|-------|
+| Waggle (`graph_raw`) | `97.4%` | Graph traversal, no reranking |
+| MemPalace | `96.6%` | Semantic search, no LLM |
+| Supermemory | `81.6%` | Self-reported |
+| Vektori | `73%` | LongMemEval-S, gemini-flash-lite |
+
+⚠️ Methodologies differ across projects. We encourage running your own evals. See [tests/artifacts/README.md](./tests/artifacts/README.md) for our setup.
 
 ### Internal Fixtures
 
@@ -449,6 +413,12 @@ Detailed artifacts and methodology: **[Benchmark Methodology](./docs/benchmark-m
 - **Deduplication recall is conservative (77.3%)**: zero false-positive merges is maintained, but recall will improve in 0.1.8.
 
 For operational details, scaling considerations, tool-level behavior, and the full MCP feature surface, see [docs/reference.md](./docs/reference.md).
+
+---
+
+## Contributing
+
+PRs and issues are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
