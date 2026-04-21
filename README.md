@@ -2,6 +2,8 @@
   <img src="https://raw.githubusercontent.com/Abhigyan-Shekhar/graph-memory-mcp/main/assets/banner.png" alt="waggle-mcp" width="720"/>
 </p>
 
+<!-- mcp-name: io.github.Abhigyan-Shekhar/Waggle-mcp -->
+
 <p align="center">
   <strong>Your AI forgets everything between sessions. Waggle gives it a graph-backed brain.</strong><br/>
   Persistent, structured memory for AI agents — typically lower-token than chunk-based retrieval, often 2-4× on factual lookups.
