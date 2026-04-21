@@ -127,16 +127,16 @@ kubectl get secret waggle-tls -o jsonpath='{.data.tls\.crt}' \
 
 ### Promote from staging to production
 
-1. Verify the staging cert is issued and the Ingress serves HTTPS correctly.
+1. Verify the staging cert is issued and the Gateway serves HTTPS correctly.
 2. Edit `certificate.yaml`: change `issuerRef.name` from `letsencrypt-staging`
    to `letsencrypt-prod`.
-3. Edit `ingress.yaml`: change the annotation to `cert-manager.io/cluster-issuer: letsencrypt-prod`.
-4. Apply both:
+3. Re-apply certificate and routing manifests:
    ```bash
    kubectl apply -f deploy/kubernetes/certificate.yaml
-   kubectl apply -f deploy/kubernetes/ingress.yaml
+   kubectl apply -f deploy/kubernetes/gateway.yaml
+   kubectl apply -f deploy/kubernetes/httproute.yaml
    ```
-5. cert-manager will issue a new, browser-trusted certificate within minutes.
+4. cert-manager will issue a new, browser-trusted certificate within minutes.
 
 ---
 

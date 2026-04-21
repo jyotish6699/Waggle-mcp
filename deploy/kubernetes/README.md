@@ -3,11 +3,17 @@
 ## Prerequisites
 
 - A Kubernetes cluster (1.26+) with:
-  - [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
+  - [Gateway API CRDs](https://gateway-api.sigs.k8s.io/)
+  - A maintained Gateway controller (for example Traefik, Kong, HAProxy, NGINX Gateway Fabric)
   - [cert-manager](https://cert-manager.io/) (for automated TLS)
   - Prometheus scraping enabled (for `/metrics`)
 - A reachable Neo4j instance (in-cluster or external)
 - `kubectl` connected to the target cluster
+- The namespace running your Gateway controller labeled for network policy access:
+  - `kubectl label namespace <gateway-namespace> networking.waggle.dev/gateway-access=true --overwrite`
+
+> `ingress-nginx` reached retirement in March 2026 and no longer receives security updates.
+> This deployment now uses Gateway API resources instead of `Ingress`.
 
 ---
 
@@ -35,8 +41,9 @@ kubectl apply -f pdb.yaml
 # 5. TLS certificate (cert-manager must be installed)
 kubectl apply -f certificate.yaml
 
-# 6. Ingress (edit hostname in ingress.yaml first)
-kubectl apply -f ingress.yaml
+# 6. Gateway API routing (edit gatewayClassName + hostname first)
+kubectl apply -f gateway.yaml
+kubectl apply -f httproute.yaml
 ```
 
 ---
@@ -85,10 +92,15 @@ kubectl get hpa waggle
 
 ---
 
-## Verify the Ingress and TLS
+## Verify Gateway and TLS
 
 ```bash
-# After DNS is pointed at the ingress controller's external IP:
+# Confirm Gateway and routes are accepted by your controller
+kubectl get gateway waggle-gateway
+kubectl get httproute
+kubectl describe gateway waggle-gateway
+
+# After DNS is pointed at the Gateway address:
 curl -v https://waggle.example.com/health/ready
 
 # Check cert-manager issued the certificate
@@ -115,5 +127,6 @@ kubectl rollout undo deployment/waggle --to-revision=2
 | Pods stuck in `Pending` | `kubectl describe pod <name>` → resource limits, node capacity |
 | Readiness probe failing | `kubectl logs <pod>` — embedding model may still be downloading |
 | TLS certificate not issued | `kubectl describe certificate waggle-tls` → cert-manager events |
+| Gateway has no address | `kubectl describe gateway waggle-gateway` and verify `gatewayClassName` in `gateway.yaml` matches your installed controller |
 | 401 from `/mcp` | Ensure `X-API-Key` header is set to a valid active key |
 | Rate-limit 429 from `/mcp` | Adjust `WAGGLE_RATE_LIMIT_RPM` in configmap.yaml |
