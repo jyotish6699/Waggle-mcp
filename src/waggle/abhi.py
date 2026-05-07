@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import json
+import logging
 import os
 import re
+import shutil
+import tempfile
 import zipfile
+import warnings
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+logger = logging.getLogger(__name__)
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
@@ -17,7 +24,13 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from waggle.errors import ValidationFailure
+from waggle.errors import (
+    ConflictResolutionError,
+    DanglingEdgeError,
+    HashVerificationError,
+    SchemaVersionError,
+    ValidationFailure,
+)
 from waggle.models import (
     AbhiChunkLoadResult,
     AbhiDiffResult,
@@ -27,11 +40,27 @@ from waggle.models import (
     AbhiMergeResult,
     AbhiQueryResult,
     AbhiValidationResult,
+    EdgeDiffRecord,
+    FieldDelta,
+    FieldLevelDiffResult,
+    MergeConflictRecord,
+    MergeStrategyConfig,
+    NodeDiffRecord,
 )
 
 ABHI_SPEC_VERSION = "2.0.0"
 ABHI_MAJOR_VERSION = 2
 ABHI_ENCRYPTION_ALGORITHM = "aes-256-gcm"
+
+# Magic bytes prepended to every .abhi file: W G L \x01 (format version byte).
+# v0 = bare ZIP (no magic, legacy files written before this was introduced)
+# v1 = WGL\x01 prefix  ← current
+# The reader strips these 4 bytes before passing the payload to zipfile.
+# Bump the version byte (e.g. \x02) only when the ZIP layout itself changes in
+# a backwards-incompatible way.
+ABHI_MAGIC = b"\x57\x47\x4C\x01"  # W G L \x01
+ABHI_MAGIC_LEN = len(ABHI_MAGIC)
+_ABHI_ZIP_MAGIC = b"PK\x03\x04"  # standard ZIP local-file-header signature
 ABHI_SIGNATURE_ALGORITHM = "ed25519"
 ABHI_CHUNK_NODE_LIMIT = 64
 ABHI_TRANSCRIPTS_MEMBER = "transcripts.jsonl"
@@ -42,6 +71,20 @@ ABHI_MANIFEST_MEMBER = "manifest.json"
 ABHI_SIGNATURE_MEMBER = "signatures/content.ed25519"
 ABHI_PUBLIC_KEY_MEMBER = "signatures/public_key.pem"
 ABHI_DETERMINISTIC_ZIP_TIMESTAMP = (2000, 1, 1, 0, 0, 0)
+
+DIFFED_FIELDS: frozenset[str] = frozenset({
+    "label", "content", "node_type", "tags",
+    "valid_from", "valid_to", "aliases", "metadata",
+})
+
+IGNORED_FIELDS: frozenset[str] = frozenset({
+    "updated_at", "access_count", "embedding_b64",
+    "embedding_model_id", "embedding_dim",
+})
+
+EDGE_DIFFED_FIELDS: frozenset[str] = frozenset({
+    "relationship", "weight", "source_id", "target_id", "metadata",
+})
 
 def _canonical_json(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -309,6 +352,10 @@ def build_abhi_document(
     include_embeddings: bool = True,
     redact_patterns: list[str] | None = None,
     encrypted: bool = False,
+    include_low_confidence_edges: bool = False,
+    low_confidence_threshold: float = 0.7,
+    strict_export: bool = False,
+    include_deps: bool = False,
 ) -> dict[str, Any]:
     redact_patterns = redact_patterns or []
     filtered = _scope_filter(
@@ -334,7 +381,30 @@ def build_abhi_document(
         "source_turn_pair_id",
         "updated_at",
     )
-    edges = _sorted_records([_normalize_edge(item) for item in filtered.get("edges", [])], "id", "source_id", "target_id", "relationship")
+    all_edges = _sorted_records([_normalize_edge(item) for item in filtered.get("edges", [])], "id", "source_id", "target_id", "relationship")
+
+    # Filter low-confidence RELATES_TO edges unless caller opts in.
+    edges_filtered_count = 0
+    if not include_low_confidence_edges:
+        kept: list[dict[str, Any]] = []
+        for edge in all_edges:
+            if str(edge.get("relationship", "")).lower() == "relates_to":
+                meta = edge.get("metadata") or {}
+                if isinstance(meta, str):
+                    try:
+                        import json as _json
+                        meta = _json.loads(meta)
+                    except Exception:
+                        meta = {}
+                confidence = float(meta.get("edge_confidence", 1.0))
+                if confidence < low_confidence_threshold:
+                    edges_filtered_count += 1
+                    continue
+            kept.append(edge)
+        edges = kept
+    else:
+        edges = all_edges
+
     context_windows = _sorted_records([_normalize_window(item) for item in filtered.get("context_windows", [])], "id", "session_id")
     repos = _sorted_records(list(filtered.get("repos", [])), "id", "name")
     context_window_edges = _sorted_records(list(filtered.get("context_window_edges", [])), "id", "source_window_id", "target_window_id", "edge_type")
@@ -356,7 +426,15 @@ def build_abhi_document(
         },
         "scope": scope,
         "includes_embeddings": include_embeddings,
-        "export_context": {},
+        "export_context": {
+            "edge_filter": {
+                "include_low_confidence_edges": include_low_confidence_edges,
+                "low_confidence_threshold": low_confidence_threshold,
+                "edges_total": len(all_edges),
+                "edges_exported": len(edges),
+                "edges_filtered": edges_filtered_count,
+            }
+        },
         "counts": {
             "transcripts": len(transcripts),
             "nodes": len(nodes),
@@ -376,6 +454,21 @@ def build_abhi_document(
         "context_windows": context_windows,
     }
     manifest["content_hash"] = _hash_with_prefix(compute_abhi_hash(document))
+    dangling_export = _find_dangling_edges(document)
+    if dangling_export:
+        if strict_export:
+            raise DanglingEdgeError(
+                f"Export contains {len(dangling_export)} dangling edge(s). "
+                "Use --include-deps or remove --strict-export."
+            )
+        if include_deps:
+            logger.info("Walking dangling edge targets to include referenced nodes (not yet implemented, continuing)")
+        else:
+            logger.warning(
+                "Export contains %d dangling edge(s): %s",
+                len(dangling_export),
+                ", ".join(dangling_export[:5]) + ("..." if len(dangling_export) > 5 else ""),
+            )
     return _with_compat_views(document)
 
 
@@ -434,6 +527,8 @@ def write_abhi_document(
     redact_patterns: list[str] | None = None,
     sign: bool = False,
     signing_key_dir: str | Path | None = None,
+    include_low_confidence_edges: bool = False,
+    low_confidence_threshold: float = 0.7,
 ) -> AbhiExportResult:
     destination = Path(output_path).expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -447,34 +542,50 @@ def write_abhi_document(
         include_embeddings=include_embeddings,
         redact_patterns=redact_patterns,
         encrypted=bool(passphrase),
+        include_low_confidence_edges=include_low_confidence_edges,
+        low_confidence_threshold=low_confidence_threshold,
     )
     manifest = document["manifest"]
-    with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        _write_member(archive, manifest, ABHI_TRANSCRIPTS_MEMBER, _record_lines(document["transcripts"]), passphrase=passphrase)
-        _write_member(archive, manifest, ABHI_NODES_MEMBER, _record_lines(document["nodes"]), passphrase=passphrase)
-        _write_member(archive, manifest, ABHI_EDGES_MEMBER, _record_lines(document["edges"]), passphrase=passphrase)
-        _write_member(
-            archive,
-            manifest,
-            ABHI_CONTEXT_WINDOWS_MEMBER,
-            _record_lines(document["context_windows"]),
-            passphrase=passphrase,
-        )
-        if sign:
-            private_key, _ = _load_or_create_signing_key(signing_key_dir or "~/.waggle/keys")
-            signature = private_key.sign(_signature_payload(document))
-            public_key = private_key.public_key().public_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    # Write the ZIP to a temp file first, then stream magic + ZIP to the final
+    # destination.  This avoids holding the entire archive in memory, which
+    # matters for large graphs (hundreds of MB of embeddings).
+    tmp_fd, tmp_path_str = tempfile.mkstemp(suffix=".abhi.tmp", dir=destination.parent)
+    tmp_path = Path(tmp_path_str)
+    try:
+        os.close(tmp_fd)
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            _write_member(archive, manifest, ABHI_TRANSCRIPTS_MEMBER, _record_lines(document["transcripts"]), passphrase=passphrase)
+            _write_member(archive, manifest, ABHI_NODES_MEMBER, _record_lines(document["nodes"]), passphrase=passphrase)
+            _write_member(archive, manifest, ABHI_EDGES_MEMBER, _record_lines(document["edges"]), passphrase=passphrase)
+            _write_member(
+                archive,
+                manifest,
+                ABHI_CONTEXT_WINDOWS_MEMBER,
+                _record_lines(document["context_windows"]),
+                passphrase=passphrase,
             )
-            _archive_writestr(archive, ABHI_SIGNATURE_MEMBER, signature)
-            _archive_writestr(archive, ABHI_PUBLIC_KEY_MEMBER, public_key)
-            manifest["signatures"] = {
-                "algorithm": ABHI_SIGNATURE_ALGORITHM,
-                "present": True,
-            }
-        manifest["content_hash"] = _hash_with_prefix(compute_abhi_hash(document))
-        _archive_writestr(archive, ABHI_MANIFEST_MEMBER, _canonical_json(manifest))
+            if sign:
+                private_key, _ = _load_or_create_signing_key(signing_key_dir or "~/.waggle/keys")
+                signature = private_key.sign(_signature_payload(document))
+                public_key = private_key.public_key().public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo,
+                )
+                _archive_writestr(archive, ABHI_SIGNATURE_MEMBER, signature)
+                _archive_writestr(archive, ABHI_PUBLIC_KEY_MEMBER, public_key)
+                manifest["signatures"] = {
+                    "algorithm": ABHI_SIGNATURE_ALGORITHM,
+                    "present": True,
+                }
+            manifest["content_hash"] = _hash_with_prefix(compute_abhi_hash(document))
+            _archive_writestr(archive, ABHI_MANIFEST_MEMBER, _canonical_json(manifest))
+        # Stream magic bytes + ZIP content to the final destination.
+        with destination.open("wb") as out_fh:
+            out_fh.write(ABHI_MAGIC)
+            with tmp_path.open("rb") as zip_fh:
+                shutil.copyfileobj(zip_fh, out_fh)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     return AbhiExportResult(
         output_path=str(destination),
         tenant_id=str(manifest.get("tenant", "")),
@@ -487,12 +598,41 @@ def write_abhi_document(
         encrypted=bool(passphrase),
         encryption_algorithm=ABHI_ENCRYPTION_ALGORITHM if passphrase else "",
         executed_actions=[],
+        export_context=dict(manifest.get("export_context", {})),
     )
 
 
 def load_abhi_document(input_path: str | Path, passphrase: str = "") -> dict[str, Any]:
     source = Path(input_path).expanduser()
-    with zipfile.ZipFile(source, "r") as archive:
+    raw = source.read_bytes()
+
+    # --- Format detection ---
+    # Guard against truncated / empty files before slicing.
+    if len(raw) < 4:
+        raise ValidationFailure(
+            f"{source} is not a valid .abhi file (file is too short or empty)."
+        )
+
+    header = raw[:ABHI_MAGIC_LEN]
+    if header == ABHI_MAGIC:
+        # v1: Waggle magic prefix present — strip it and open the ZIP payload.
+        zip_source: str | Path | io.BytesIO = io.BytesIO(raw[ABHI_MAGIC_LEN:])
+    elif raw[:4] == _ABHI_ZIP_MAGIC:
+        # v0: bare ZIP written before magic bytes were introduced.
+        # Warn so users know to re-export with a current Waggle client.
+        logger.warning(
+            "%s is a legacy v0 .abhi file (no magic bytes). "
+            "Re-export with Waggle 0.1.15+ to upgrade to the v1 format.",
+            source,
+        )
+        zip_source = source
+    else:
+        raise ValidationFailure(
+            f"{source} is not a valid .abhi file. "
+            "The file may be corrupt or was not exported by a Waggle MCP client."
+        )
+
+    with zipfile.ZipFile(zip_source, "r") as archive:
         if ABHI_MANIFEST_MEMBER not in archive.namelist():
             raise ValidationFailure(f"{source} is missing {ABHI_MANIFEST_MEMBER}.")
         manifest = json.loads(archive.read(ABHI_MANIFEST_MEMBER).decode("utf-8"))
@@ -541,37 +681,392 @@ def _diff_dicts(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return _canonical_json(left) != _canonical_json(right)
 
 
+def _classify_node_identity(node_a, node_b) -> Literal["identical", "modified", "separate"]:
+    if node_a["id"] != node_b["id"]:
+        return "separate"
+    for field in DIFFED_FIELDS:
+        if field == "metadata":
+            meta_a = node_a.get("metadata") or {}
+            meta_b = node_b.get("metadata") or {}
+            all_keys = set(meta_a) | set(meta_b)
+            for key in all_keys:
+                if json.dumps(meta_a.get(key), sort_keys=True, default=str) != json.dumps(meta_b.get(key), sort_keys=True, default=str):
+                    return "modified"
+        else:
+            if json.dumps(node_a.get(field), sort_keys=True, default=str) != json.dumps(node_b.get(field), sort_keys=True, default=str):
+                return "modified"
+    return "identical"
+
+
+def _classify_edge_identity(edge_a, edge_b) -> Literal["identical", "modified", "separate"]:
+    if edge_a["id"] != edge_b["id"]:
+        return "separate"
+    for field in EDGE_DIFFED_FIELDS:
+        if json.dumps(edge_a.get(field), sort_keys=True, default=str) != json.dumps(edge_b.get(field), sort_keys=True, default=str):
+            return "modified"
+    return "identical"
+
+
+def _compute_node_delta(node_a, node_b) -> list[FieldDelta]:
+    deltas = []
+    for field in DIFFED_FIELDS:
+        if field == "metadata":
+            meta_a = (node_a.get("metadata") or {}) if node_a is not None else {}
+            meta_b = (node_b.get("metadata") or {}) if node_b is not None else {}
+            for key in sorted(set(meta_a) | set(meta_b)):
+                old_val = meta_a.get(key)
+                new_val = meta_b.get(key)
+                if json.dumps(old_val, sort_keys=True, default=str) != json.dumps(new_val, sort_keys=True, default=str):
+                    deltas.append(FieldDelta(
+                        field=f"metadata.{key}",
+                        old_value=old_val if node_a is not None else None,
+                        new_value=new_val if node_b is not None else None,
+                    ))
+        else:
+            old_val = node_a.get(field) if node_a is not None else None
+            new_val = node_b.get(field) if node_b is not None else None
+            if json.dumps(old_val, sort_keys=True, default=str) != json.dumps(new_val, sort_keys=True, default=str):
+                deltas.append(FieldDelta(field=field, old_value=old_val, new_value=new_val))
+    return deltas
+
+
+def _compute_edge_delta(edge_a, edge_b) -> list[FieldDelta]:
+    deltas = []
+    for field in EDGE_DIFFED_FIELDS:
+        old_val = edge_a.get(field) if edge_a is not None else None
+        new_val = edge_b.get(field) if edge_b is not None else None
+        if json.dumps(old_val, sort_keys=True, default=str) != json.dumps(new_val, sort_keys=True, default=str):
+            deltas.append(FieldDelta(field=field, old_value=old_val, new_value=new_val))
+    return deltas
+
+
+def _check_schema_version_compatibility(version_a: str, version_b: str, operation: str) -> None:
+    def _major(v):
+        try:
+            return int(str(v).split(".", 1)[0].strip() or "0")
+        except ValueError:
+            return 0
+    if _major(version_a) != _major(version_b):
+        raise SchemaVersionError(
+            f"Cannot {operation} documents with incompatible schema versions: "
+            f"{version_a} vs {version_b}. "
+            f"Run 'waggle upgrade <file> --to {version_b}' to upgrade the older document first."
+        )
+
+
 def diff_abhi_documents(
     document_a: dict[str, Any],
     document_b: dict[str, Any],
     *,
     input_path_a: str | Path,
     input_path_b: str | Path,
-) -> AbhiDiffResult:
+    base_document: dict[str, Any] | None = None,
+) -> FieldLevelDiffResult:
+    version_a = str(document_a.get("manifest", {}).get("schema_version", ABHI_SPEC_VERSION))
+    version_b = str(document_b.get("manifest", {}).get("schema_version", ABHI_SPEC_VERSION))
+
+    result_warnings: list[str] = []
+    schema_version_mismatch = False
+
+    def _major(v: str) -> int:
+        try:
+            return int(str(v).split(".", 1)[0].strip() or "0")
+        except ValueError:
+            return 0
+
+    if version_a != version_b:
+        if _major(version_a) != _major(version_b):
+            raise SchemaVersionError(
+                f"Cannot diff documents with incompatible schema versions: "
+                f"{version_a} vs {version_b}. "
+                f"Run 'waggle upgrade <file> --to {version_b}' to upgrade the older document first."
+            )
+        else:
+            schema_version_mismatch = True
+            result_warnings.append(
+                f"Schema version mismatch: {version_a} vs {version_b}. Diff may be incomplete."
+            )
+
     nodes_a = {str(node.get("id", "")): node for node in document_a.get("nodes", [])}
     nodes_b = {str(node.get("id", "")): node for node in document_b.get("nodes", [])}
     edges_a = {str(edge.get("id", "")): edge for edge in document_a.get("edges", [])}
     edges_b = {str(edge.get("id", "")): edge for edge in document_b.get("edges", [])}
-    nodes_added = sorted(node_id for node_id in nodes_b if node_id and node_id not in nodes_a)
-    nodes_removed = sorted(node_id for node_id in nodes_a if node_id and node_id not in nodes_b)
-    nodes_updated = sorted(node_id for node_id in nodes_a.keys() & nodes_b.keys() if _diff_dicts(nodes_a[node_id], nodes_b[node_id]))
-    edges_added = sorted(edge_id for edge_id in edges_b if edge_id and edge_id not in edges_a)
-    edges_removed = sorted(edge_id for edge_id in edges_a if edge_id and edge_id not in edges_b)
-    edges_updated = sorted(edge_id for edge_id in edges_a.keys() & edges_b.keys() if _diff_dicts(edges_a[edge_id], edges_b[edge_id]))
-    semantic_changes = [f"updated node {node_id}" for node_id in nodes_updated] + [f"updated edge {edge_id}" for edge_id in edges_updated]
-    return AbhiDiffResult(
+
+    nodes_added: list[str] = []
+    nodes_removed: list[str] = []
+    nodes_updated: list[str] = []
+    node_records: list[NodeDiffRecord] = []
+
+    all_node_ids = sorted(set(nodes_a) | set(nodes_b))
+    for nid in all_node_ids:
+        if not nid:
+            continue
+        na = nodes_a.get(nid)
+        nb = nodes_b.get(nid)
+        if na is None:
+            nodes_added.append(nid)
+            deltas = _compute_node_delta(None, nb)
+            node_records.append(NodeDiffRecord(
+                node_id=nid,
+                classification="added",
+                label=str(nb.get("label", "") or nb.get("content", "")[:60]),
+                deltas=deltas,
+            ))
+        elif nb is None:
+            nodes_removed.append(nid)
+            deltas = _compute_node_delta(na, None)
+            node_records.append(NodeDiffRecord(
+                node_id=nid,
+                classification="removed",
+                label=str(na.get("label", "") or na.get("content", "")[:60]),
+                deltas=deltas,
+            ))
+        else:
+            classification = _classify_node_identity(na, nb)
+            if classification == "modified":
+                nodes_updated.append(nid)
+                deltas = _compute_node_delta(na, nb)
+                node_records.append(NodeDiffRecord(
+                    node_id=nid,
+                    classification="modified",
+                    label=str(nb.get("label", "") or nb.get("content", "")[:60]),
+                    deltas=deltas,
+                ))
+            else:
+                node_records.append(NodeDiffRecord(
+                    node_id=nid,
+                    classification="identical",
+                    label=str(nb.get("label", "") or nb.get("content", "")[:60]),
+                    deltas=[],
+                ))
+
+    edges_added: list[str] = []
+    edges_removed: list[str] = []
+    edges_updated: list[str] = []
+    edge_records: list[EdgeDiffRecord] = []
+
+    all_edge_ids = sorted(set(edges_a) | set(edges_b))
+    for eid in all_edge_ids:
+        if not eid:
+            continue
+        ea = edges_a.get(eid)
+        eb = edges_b.get(eid)
+        if ea is None:
+            edges_added.append(eid)
+            deltas = _compute_edge_delta(None, eb)
+            edge_records.append(EdgeDiffRecord(edge_id=eid, classification="added", deltas=deltas))
+        elif eb is None:
+            edges_removed.append(eid)
+            deltas = _compute_edge_delta(ea, None)
+            edge_records.append(EdgeDiffRecord(edge_id=eid, classification="removed", deltas=deltas))
+        else:
+            classification = _classify_edge_identity(ea, eb)
+            if classification == "modified":
+                edges_updated.append(eid)
+                deltas = _compute_edge_delta(ea, eb)
+                edge_records.append(EdgeDiffRecord(edge_id=eid, classification="modified", deltas=deltas))
+            else:
+                edge_records.append(EdgeDiffRecord(edge_id=eid, classification="identical", deltas=[]))
+
+    # Three-way conflict detection
+    conflict_records: list[MergeConflictRecord] = []
+    diff_mode: Literal["two_way", "three_way"] = "two_way"
+    input_path_base_str = ""
+    if base_document is not None:
+        diff_mode = "three_way"
+        input_path_base_str = ""  # not a file path in this context
+        nodes_base = {str(n.get("id", "")): n for n in base_document.get("nodes", [])}
+        for nid in sorted(set(nodes_a) & set(nodes_b)):
+            if not nid:
+                continue
+            base_node = nodes_base.get(nid)
+            left_node = nodes_a.get(nid)
+            right_node = nodes_b.get(nid)
+            if base_node is None or left_node is None or right_node is None:
+                continue
+            for field in DIFFED_FIELDS:
+                base_val = base_node.get(field)
+                left_val = left_node.get(field)
+                right_val = right_node.get(field)
+                left_changed = json.dumps(base_val, sort_keys=True, default=str) != json.dumps(left_val, sort_keys=True, default=str)
+                right_changed = json.dumps(base_val, sort_keys=True, default=str) != json.dumps(right_val, sort_keys=True, default=str)
+                if left_changed and right_changed and json.dumps(left_val, sort_keys=True, default=str) != json.dumps(right_val, sort_keys=True, default=str):
+                    conflict_records.append(MergeConflictRecord(
+                        object_id=nid,
+                        object_type="node",
+                        field=field,
+                        base_value=base_val,
+                        left_value=left_val,
+                        right_value=right_val,
+                    ))
+
+        # Edge three-way conflict detection
+        edges_base = {str(e.get("id", "")): e for e in base_document.get("edges", [])}
+        for eid in sorted(set(edges_a) & set(edges_b)):
+            if not eid:
+                continue
+            base_edge = edges_base.get(eid)
+            left_edge = edges_a.get(eid)
+            right_edge = edges_b.get(eid)
+            if base_edge is None or left_edge is None or right_edge is None:
+                continue
+            for field in EDGE_DIFFED_FIELDS:
+                base_val = base_edge.get(field)
+                left_val = left_edge.get(field)
+                right_val = right_edge.get(field)
+                left_changed = json.dumps(base_val, sort_keys=True, default=str) != json.dumps(left_val, sort_keys=True, default=str)
+                right_changed = json.dumps(base_val, sort_keys=True, default=str) != json.dumps(right_val, sort_keys=True, default=str)
+                if left_changed and right_changed and json.dumps(left_val, sort_keys=True, default=str) != json.dumps(right_val, sort_keys=True, default=str):
+                    conflict_records.append(MergeConflictRecord(
+                        object_id=eid,
+                        object_type="edge",
+                        field=field,
+                        base_value=base_val,
+                        left_value=left_val,
+                        right_value=right_val,
+                    ))
+
+    return FieldLevelDiffResult(
         input_path_a=str(Path(input_path_a).expanduser()),
         input_path_b=str(Path(input_path_b).expanduser()),
-        abhi_spec_version_a=str(document_a.get("manifest", {}).get("schema_version", ABHI_SPEC_VERSION)),
-        abhi_spec_version_b=str(document_b.get("manifest", {}).get("schema_version", ABHI_SPEC_VERSION)),
+        input_path_base=input_path_base_str,
+        abhi_spec_version_a=version_a,
+        abhi_spec_version_b=version_b,
+        diff_mode=diff_mode,
         nodes_added=nodes_added,
         nodes_removed=nodes_removed,
         nodes_updated=nodes_updated,
         edges_added=edges_added,
         edges_removed=edges_removed,
         edges_updated=edges_updated,
-        semantic_changes=semantic_changes,
+        node_records=node_records,
+        edge_records=edge_records,
+        conflict_records=conflict_records,
+        warnings=result_warnings,
+        schema_version_mismatch=schema_version_mismatch,
     )
+
+
+def _set_field_val(item: dict[str, Any], field: str, value: Any) -> None:
+    """Set a field on an item, supporting metadata.* nested fields."""
+    if field.startswith("metadata."):
+        key = field[len("metadata."):]
+        if "metadata" not in item or item["metadata"] is None:
+            item["metadata"] = {}
+        item["metadata"][key] = value
+    else:
+        item[field] = value
+
+
+def _apply_merge_strategy(
+    item_id: str,
+    object_type: Literal["node", "edge"],
+    base_item: dict[str, Any] | None,
+    left_item: dict[str, Any],
+    right_item: dict[str, Any],
+    *,
+    strategy: str,
+    strategy_config: MergeStrategyConfig | None,
+    conflict_records: list[MergeConflictRecord],
+    contradict_edges: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Apply the merge strategy to a single conflicting item."""
+    from uuid import uuid4
+    fields = DIFFED_FIELDS if object_type == "node" else EDGE_DIFFED_FIELDS
+    result = deepcopy(right_item)  # start with right as base
+
+    for field in fields:
+        base_val = base_item.get(field) if base_item is not None else None
+        left_val = left_item.get(field)
+        right_val = right_item.get(field)
+
+        left_changed = json.dumps(base_val, sort_keys=True, default=str) != json.dumps(left_val, sort_keys=True, default=str)
+        right_changed = json.dumps(base_val, sort_keys=True, default=str) != json.dumps(right_val, sort_keys=True, default=str)
+
+        if not left_changed and not right_changed:
+            continue
+        if left_changed and not right_changed:
+            _set_field_val(result, field, left_val)
+            continue
+        if not left_changed and right_changed:
+            _set_field_val(result, field, right_val)
+            continue
+
+        # Both changed — conflict
+        # Determine effective strategy for this field.
+        # Apply type_overrides first (broad), then field_overrides (specific)
+        # so that field-level overrides take precedence over type-level ones.
+        effective_strategy = strategy
+        if strategy_config is not None:
+            if object_type == "node":
+                node_type_val = str(left_item.get("node_type", ""))
+                for override in strategy_config.type_overrides:
+                    if override.node_type == node_type_val:
+                        effective_strategy = override.strategy
+                        break
+            for override in strategy_config.field_overrides:
+                if override.field == field:
+                    effective_strategy = override.strategy
+                    break
+
+        resolved_by = effective_strategy
+        if effective_strategy == "prefer_left":
+            resolved_val = left_val
+        elif effective_strategy == "prefer_right":
+            resolved_val = right_val
+        elif effective_strategy == "last_write_wins":
+            left_ts = str(left_item.get("updated_at") or left_item.get("created_at") or "")
+            right_ts = str(right_item.get("updated_at") or right_item.get("created_at") or "")
+            if right_ts >= left_ts:
+                resolved_val = right_val
+                resolved_by = "last_write_wins"
+            else:
+                resolved_val = left_val
+                resolved_by = "last_write_wins"
+        elif effective_strategy == "contradict":
+            resolved_val = right_val
+            resolved_by = "contradict"
+            # Schedule a CONTRADICTS edge.
+            # For node conflicts, link the node to itself (self-loop).
+            # For edge conflicts, link the edge's source and target nodes
+            # to avoid creating a dangling edge that references an edge ID.
+            if object_type == "edge":
+                contradict_source = str(left_item.get("source_id", item_id))
+                contradict_target = str(left_item.get("target_id", item_id))
+            else:
+                contradict_source = item_id
+                contradict_target = item_id
+            contradict_edges.append({
+                "id": str(uuid4()),
+                "source_id": contradict_source,
+                "target_id": contradict_target,
+                "relationship": "contradicts",
+                "weight": 1.0,
+                "metadata": {
+                    "conflict_field": field,
+                    "conflict_edge_id": item_id if object_type == "edge" else "",
+                    "left_value": left_val,
+                    "right_value": right_val,
+                    "auto_generated": True,
+                },
+            })
+        else:
+            resolved_val = right_val
+            resolved_by = effective_strategy
+
+        _set_field_val(result, field, resolved_val)
+        conflict_records.append(MergeConflictRecord(
+            object_id=item_id,
+            object_type=object_type,
+            field=field,
+            base_value=base_val,
+            left_value=left_val,
+            right_value=right_val,
+            resolved_by=resolved_by,
+            resolved_value=resolved_val,
+        ))
+
+    return result
 
 
 def _merge_records(
@@ -579,8 +1074,11 @@ def _merge_records(
     left_items: list[dict[str, Any]],
     right_items: list[dict[str, Any]],
     *,
-    merge_strategy: str,
-    conflicts: list[str],
+    object_type: Literal["node", "edge"] = "node",
+    merge_strategy: str = "contradict",
+    strategy_config: MergeStrategyConfig | None = None,
+    conflict_records: list[MergeConflictRecord],
+    contradict_edges: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     base_map = {str(item.get("id", "")): item for item in base_items if str(item.get("id", "")).strip()}
     left_map = {str(item.get("id", "")): item for item in left_items if str(item.get("id", "")).strip()}
@@ -600,16 +1098,26 @@ def _merge_records(
         if not _diff_dicts(left_item, right_item):
             merged[item_id] = deepcopy(left_item)
             continue
-        if merge_strategy == "prefer_left":
+        base_item = base_map.get(item_id)
+        # Check if both sides changed relative to base
+        left_changed_from_base = base_item is None or _diff_dicts(base_item, left_item)
+        right_changed_from_base = base_item is None or _diff_dicts(base_item, right_item)
+        if left_changed_from_base and right_changed_from_base:
+            merged[item_id] = _apply_merge_strategy(
+                item_id,
+                object_type,
+                base_item,
+                left_item,
+                right_item,
+                strategy=merge_strategy,
+                strategy_config=strategy_config,
+                conflict_records=conflict_records,
+                contradict_edges=contradict_edges,
+            )
+        elif left_changed_from_base:
             merged[item_id] = deepcopy(left_item)
-        elif merge_strategy == "prefer_right":
-            merged[item_id] = deepcopy(right_item)
         else:
-            left_ts = str(left_item.get("updated_at") or left_item.get("created_at") or "")
-            right_ts = str(right_item.get("updated_at") or right_item.get("created_at") or "")
-            merged[item_id] = deepcopy(right_item if right_ts >= left_ts else left_item)
-        if _diff_dicts(base_map.get(item_id, {}), left_item) and _diff_dicts(base_map.get(item_id, {}), right_item):
-            conflicts.append(f"Conflict on {item_id}")
+            merged[item_id] = deepcopy(right_item)
     return list(merged.values())
 
 
@@ -622,40 +1130,67 @@ def merge_abhi_documents(
     left_input_path: str | Path,
     right_input_path: str | Path,
     output_path: str | Path,
-    merge_strategy: str = "prefer_right",
+    merge_strategy: str = "contradict",
+    strategy_config: MergeStrategyConfig | None = None,
     passphrase: str = "",
+    dry_run: bool = False,
 ) -> AbhiMergeResult:
-    conflicts: list[str] = []
+    import time
+    _t0 = time.monotonic()
+
+    conflict_records: list[MergeConflictRecord] = []
+    contradict_edges: list[dict[str, Any]] = []
+
+    merged_nodes = _merge_records(
+        base_document.get("nodes", []),
+        left_document.get("nodes", []),
+        right_document.get("nodes", []),
+        object_type="node",
+        merge_strategy=merge_strategy,
+        strategy_config=strategy_config,
+        conflict_records=conflict_records,
+        contradict_edges=contradict_edges,
+    )
+    merged_edges = _merge_records(
+        base_document.get("edges", []),
+        left_document.get("edges", []),
+        right_document.get("edges", []),
+        object_type="edge",
+        merge_strategy=merge_strategy,
+        strategy_config=strategy_config,
+        conflict_records=conflict_records,
+        contradict_edges=contradict_edges,
+    )
+    # Add contradict edges from node conflicts
+    merged_edges.extend(contradict_edges)
+
+    merged_transcripts = _merge_records(
+        base_document.get("transcripts", []),
+        left_document.get("transcripts", []),
+        right_document.get("transcripts", []),
+        object_type="node",
+        merge_strategy=merge_strategy,
+        strategy_config=strategy_config,
+        conflict_records=conflict_records,
+        contradict_edges=[],
+    )
+    merged_windows = _merge_records(
+        base_document.get("context_windows", []),
+        left_document.get("context_windows", []),
+        right_document.get("context_windows", []),
+        object_type="node",
+        merge_strategy=merge_strategy,
+        strategy_config=strategy_config,
+        conflict_records=conflict_records,
+        contradict_edges=[],
+    )
+
     merged_snapshot = {
         "tenant_id": str(right_document.get("manifest", {}).get("tenant") or left_document.get("manifest", {}).get("tenant", "")),
-        "transcripts": _merge_records(
-            base_document.get("transcripts", []),
-            left_document.get("transcripts", []),
-            right_document.get("transcripts", []),
-            merge_strategy=merge_strategy,
-            conflicts=conflicts,
-        ),
-        "nodes": _merge_records(
-            base_document.get("nodes", []),
-            left_document.get("nodes", []),
-            right_document.get("nodes", []),
-            merge_strategy=merge_strategy,
-            conflicts=conflicts,
-        ),
-        "edges": _merge_records(
-            base_document.get("edges", []),
-            left_document.get("edges", []),
-            right_document.get("edges", []),
-            merge_strategy=merge_strategy,
-            conflicts=conflicts,
-        ),
-        "context_windows": _merge_records(
-            base_document.get("context_windows", []),
-            left_document.get("context_windows", []),
-            right_document.get("context_windows", []),
-            merge_strategy=merge_strategy,
-            conflicts=conflicts,
-        ),
+        "transcripts": merged_transcripts,
+        "nodes": merged_nodes,
+        "edges": merged_edges,
+        "context_windows": merged_windows,
         "ui": deepcopy(right_document.get("manifest", {}).get("ui", {}) or left_document.get("manifest", {}).get("ui", {})),
         "repos": deepcopy(right_document.get("manifest", {}).get("repos", []) or left_document.get("manifest", {}).get("repos", [])),
         "context_window_edges": deepcopy(
@@ -672,7 +1207,59 @@ def merge_abhi_documents(
             or 0
         ),
     }
+
+    conflicts_str = [f"Conflict on {r.object_id} field={r.field}" for r in conflict_records]
+
+    if dry_run:
+        _elapsed = time.monotonic() - _t0
+        logger.info("Dry-run merge completed in %.3fs: %d nodes, %d edges, %d conflicts",
+                    _elapsed, len(merged_nodes), len(merged_edges), len(conflict_records))
+        return AbhiMergeResult(
+            base_input_path=str(base_input_path),
+            left_input_path=str(left_input_path),
+            right_input_path=str(right_input_path),
+            output_path="",
+            merge_strategy=merge_strategy,
+            abhi_spec_version=ABHI_SPEC_VERSION,
+            nodes_merged=len(merged_nodes),
+            edges_merged=len(merged_edges),
+            conflicts=conflicts_str,
+            content_hash="",
+            embedding_count=0,
+            encrypted=False,
+            encryption_algorithm="",
+            executed_actions=[],
+            conflict_records=conflict_records,
+            dry_run=True,
+            hash_verified=False,
+            dangling_edges_dropped=[],
+            contradict_edges_added=len(contradict_edges),
+        )
+
     exported = write_abhi_document(merged_snapshot, output_path=output_path, passphrase=passphrase)
+
+    # Hash verification
+    hash_verified = False
+    try:
+        output_doc = load_abhi_document(output_path, passphrase=passphrase)
+        actual_hash = compute_abhi_hash(output_doc)
+        expected_hash = str(output_doc.get("manifest", {}).get("content_hash", "")).removeprefix("sha256:")
+        if actual_hash == expected_hash:
+            hash_verified = True
+        else:
+            Path(output_path).unlink(missing_ok=True)
+            raise HashVerificationError(
+                f"Post-merge hash verification failed: expected {expected_hash}, got {actual_hash}"
+            )
+    except HashVerificationError:
+        raise
+    except Exception as exc:
+        logger.warning("Hash verification failed: %s", exc)
+
+    _elapsed = time.monotonic() - _t0
+    logger.info("Merge completed in %.3fs: %d nodes, %d edges, %d conflicts",
+                _elapsed, len(merged_nodes), len(merged_edges), len(conflict_records))
+
     return AbhiMergeResult(
         base_input_path=str(base_input_path),
         left_input_path=str(left_input_path),
@@ -680,14 +1267,19 @@ def merge_abhi_documents(
         output_path=exported.output_path,
         merge_strategy=merge_strategy,
         abhi_spec_version=ABHI_SPEC_VERSION,
-        nodes_merged=len(merged_snapshot["nodes"]),
-        edges_merged=len(merged_snapshot["edges"]),
-        conflicts=conflicts,
+        nodes_merged=len(merged_nodes),
+        edges_merged=len(merged_edges),
+        conflicts=conflicts_str,
         content_hash=exported.content_hash,
         embedding_count=exported.embedding_count,
         encrypted=exported.encrypted,
         encryption_algorithm=exported.encryption_algorithm,
         executed_actions=[],
+        conflict_records=conflict_records,
+        dry_run=False,
+        hash_verified=hash_verified,
+        dangling_edges_dropped=[],
+        contradict_edges_added=len(contradict_edges),
     )
 
 
@@ -844,10 +1436,55 @@ def dispatch_abhi_event(
     return action_map.get(event_name, [])
 
 
-def validate_abhi_signature(document: dict[str, Any]) -> None:
+def _find_dangling_edges(document: dict[str, Any]) -> list[str]:
+    """Return edge IDs whose source_id or target_id is not in the document's node set."""
+    node_ids = {str(n["id"]) for n in document.get("nodes", []) if n.get("id")}
+    dangling: list[str] = []
+    for edge in document.get("edges", []):
+        source = str(edge.get("source_id", ""))
+        target = str(edge.get("target_id", ""))
+        if source not in node_ids or target not in node_ids:
+            dangling.append(str(edge.get("id", "")))
+    return dangling
+
+
+def validate_abhi_signature(
+    document: dict[str, Any],
+    *,
+    trusted_public_key_path: str | Path | None = None,
+) -> None:
+    """Verify the Ed25519 signature on a signed .abhi document.
+
+    If *trusted_public_key_path* is provided, the public key is loaded from
+    that external file.  This is the **recommended** mode because it
+    prevents an attacker from re-signing a tampered archive with their own
+    key pair and bundling it inside the ZIP.
+
+    When *trusted_public_key_path* is ``None`` the function falls back to
+    the public key embedded inside the archive and emits a warning.  Use
+    this fallback only for quick smoke-checks, never for trust decisions.
+    """
     if not document.get("manifest", {}).get("signatures", {}).get("present"):
         raise ValidationFailure("This .abhi file is not signed.")
-    public_key = serialization.load_pem_public_key(document["public_key_pem"])
+
+    if trusted_public_key_path is not None:
+        key_path = Path(trusted_public_key_path).expanduser()
+        if not key_path.exists():
+            raise ValidationFailure(
+                f"Trusted public key file not found: {key_path}"
+            )
+        public_key = serialization.load_pem_public_key(key_path.read_bytes())
+    else:
+        warnings.warn(
+            "Verifying .abhi signature using the public key bundled inside "
+            "the archive.  This does NOT protect against an attacker who "
+            "re-signs a tampered file.  Pass trusted_public_key_path for "
+            "genuine trust verification.",
+            UserWarning,
+            stacklevel=2,
+        )
+        public_key = serialization.load_pem_public_key(document["public_key_pem"])
+
     if not isinstance(public_key, ed25519.Ed25519PublicKey):
         raise ValidationFailure("Unsupported ABHI public key.")
     try:
@@ -875,6 +1512,16 @@ def validate_abhi_document(document: dict[str, Any], *, input_path: str | Path) 
             errors.append(str(exc))
     if not document.get("nodes") and not document.get("transcripts"):
         warnings.append("ABHI payload is empty.")
+    dangling_edges = _find_dangling_edges(document)
+    dangling_edge_count = len(dangling_edges)
+    boundary_warning = ""
+    if dangling_edges:
+        boundary_warning = (
+            f"Document contains {dangling_edge_count} dangling edge(s): "
+            f"{', '.join(dangling_edges[:5])}"
+            f"{'...' if dangling_edge_count > 5 else ''}"
+        )
+        warnings.append(boundary_warning)
     return AbhiValidationResult(
         input_path=str(Path(input_path).expanduser()),
         valid=not errors,
@@ -887,6 +1534,9 @@ def validate_abhi_document(document: dict[str, Any], *, input_path: str | Path) 
         embedding_count=sum(1 for node in document.get("nodes", []) if str(node.get("embedding_b64", "")).strip()),
         encrypted=bool(manifest.get("encryption", {}).get("enabled")),
         encryption_algorithm=str(manifest.get("encryption", {}).get("algorithm", "")),
+        dangling_edges=dangling_edges,
+        dangling_edge_count=dangling_edge_count,
+        boundary_warning=boundary_warning,
     )
 
 
@@ -907,7 +1557,30 @@ def abhi_to_snapshot(
     namespace: str = "",
     read_only: bool = False,
     reembed_on_import: bool = False,
+    allow_dangling: bool = False,
+    skip_verify: bool = False,
+    force: bool = False,
 ) -> dict[str, Any]:
+    dangling = _find_dangling_edges(document)
+    if dangling:
+        if allow_dangling or force:
+            logger.warning(
+                "Dropping %d dangling edge(s) on import: %s",
+                len(dangling),
+                ", ".join(dangling[:5]) + ("..." if len(dangling) > 5 else ""),
+            )
+            dangling_set = set(dangling)
+            document = {
+                **document,
+                "edges": [e for e in document.get("edges", []) if str(e.get("id", "")) not in dangling_set],
+            }
+        else:
+            raise DanglingEdgeError(
+                f"Document contains {len(dangling)} dangling edge(s): "
+                f"{', '.join(dangling[:5])}"
+                f"{'...' if len(dangling) > 5 else ''}. "
+                "Use --allow-dangling to import anyway."
+            )
     manifest = document.get("manifest", {})
     node_id_map = {
         str(node.get("id", "")): _namespace_id(namespace, str(node.get("id", "")))
@@ -1009,10 +1682,17 @@ def decrypt_abhi_document(document: dict[str, Any], *, passphrase: str) -> dict[
     return deepcopy(document)
 
 
-def diff_abhi_files(*, input_path_a: str | Path, input_path_b: str | Path, passphrase: str = "") -> AbhiDiffResult:
+def diff_abhi_files(
+    *,
+    input_path_a: str | Path,
+    input_path_b: str | Path,
+    input_path_base: str | Path | None = None,
+    passphrase: str = "",
+) -> FieldLevelDiffResult:
     document_a = load_abhi_document(input_path_a, passphrase=passphrase)
     document_b = load_abhi_document(input_path_b, passphrase=passphrase)
-    return diff_abhi_documents(document_a, document_b, input_path_a=input_path_a, input_path_b=input_path_b)
+    base_document = load_abhi_document(input_path_base, passphrase=passphrase) if input_path_base is not None else None
+    return diff_abhi_documents(document_a, document_b, input_path_a=input_path_a, input_path_b=input_path_b, base_document=base_document)
 
 
 def merge_abhi_files(
@@ -1021,8 +1701,10 @@ def merge_abhi_files(
     left_input_path: str | Path,
     right_input_path: str | Path,
     output_path: str | Path,
-    merge_strategy: str = "prefer_right",
+    merge_strategy: str = "contradict",
+    strategy_config: MergeStrategyConfig | None = None,
     passphrase: str = "",
+    dry_run: bool = False,
 ) -> AbhiMergeResult:
     return merge_abhi_documents(
         load_abhi_document(base_input_path, passphrase=passphrase),
@@ -1033,8 +1715,195 @@ def merge_abhi_files(
         right_input_path=right_input_path,
         output_path=output_path,
         merge_strategy=merge_strategy,
+        strategy_config=strategy_config,
         passphrase=passphrase,
+        dry_run=dry_run,
     )
+
+
+def resolve_abhi_conflict(
+    *,
+    merged_path: str | Path,
+    conflict_id: str,
+    resolution: Literal["ours", "theirs", "value"],
+    value: Any = None,
+    passphrase: str = "",
+) -> AbhiMergeResult:
+    """Post-merge resolution of a single conflict by ID."""
+    document = load_abhi_document(merged_path, passphrase=passphrase)
+    manifest = document.get("manifest", {})
+    conflict_records_raw = manifest.get("conflict_records")
+    if conflict_records_raw is None:
+        raise ConflictResolutionError("No conflict records found in merged document.")
+    # Find the matching conflict record
+    matching = None
+    for rec in conflict_records_raw:
+        if isinstance(rec, dict) and str(rec.get("conflict_id", "")) == conflict_id:
+            matching = rec
+            break
+    if matching is None:
+        raise ConflictResolutionError(f"Unknown conflict ID: {conflict_id}")
+
+    # Determine resolved value
+    if resolution == "ours":
+        resolved_val = matching.get("left_value")
+    elif resolution == "theirs":
+        resolved_val = matching.get("right_value")
+    else:
+        resolved_val = value
+
+    # Apply to the node/edge in the document
+    object_id = str(matching.get("object_id", ""))
+    object_type = str(matching.get("object_type", "node"))
+    field = str(matching.get("field", ""))
+
+    collection = "nodes" if object_type == "node" else "edges"
+    for item in document.get(collection, []):
+        if str(item.get("id", "")) == object_id:
+            _set_field_val(item, field, resolved_val)
+            break
+
+    # Rewrite the document
+    snapshot = abhi_to_snapshot(document, fallback_tenant_id="", allow_dangling=True)
+    exported = write_abhi_document(snapshot, output_path=merged_path, passphrase=passphrase)
+
+    return AbhiMergeResult(
+        base_input_path="",
+        left_input_path="",
+        right_input_path="",
+        output_path=exported.output_path,
+        merge_strategy="resolved",
+        abhi_spec_version=ABHI_SPEC_VERSION,
+        nodes_merged=exported.node_count,
+        edges_merged=exported.edge_count,
+        conflicts=[],
+        content_hash=exported.content_hash,
+        embedding_count=exported.embedding_count,
+        encrypted=exported.encrypted,
+        encryption_algorithm=exported.encryption_algorithm,
+        executed_actions=[f"resolved conflict {conflict_id} via {resolution}"],
+    )
+
+
+def upgrade_abhi_document(
+    document: dict[str, Any],
+    *,
+    input_path: str | Path,
+    target_version: str,
+    output_path: str | Path,
+    passphrase: str = "",
+) -> AbhiExportResult:
+    """Promote a .abhi document from an older schema version to target_version."""
+    manifest = document.get("manifest", {})
+    current_version = (
+        str(manifest.get("schema_version", ""))
+        or str(document.get("integrity", {}).get("abhi_spec_version", ""))
+        or "1.0.0"
+    )
+
+    if current_version == target_version:
+        logger.info(
+            "Document already at target version %s, no upgrade needed.", target_version
+        )
+        return AbhiExportResult(
+            output_path=str(Path(output_path).expanduser()),
+            tenant_id=str(manifest.get("tenant", "")),
+            schema_version=ABHI_MAJOR_VERSION,
+            abhi_spec_version=current_version,
+            node_count=len(document.get("nodes", [])),
+            edge_count=len(document.get("edges", [])),
+            content_hash=str(manifest.get("content_hash", "")),
+            embedding_count=sum(1 for n in document.get("nodes", []) if str(n.get("embedding_b64", "")).strip()),
+            encrypted=bool(manifest.get("encryption", {}).get("enabled")),
+            encryption_algorithm=str(manifest.get("encryption", {}).get("algorithm", "")),
+            executed_actions=[],
+        )
+
+    def _major(v: str) -> int:
+        try:
+            return int(str(v).split(".", 1)[0].strip() or "0")
+        except ValueError:
+            return 0
+
+    current_major = _major(current_version)
+    target_major = _major(target_version)
+
+    if current_major == 1 and target_major == 2:
+        # v1 JSON → v2 ZIP upgrade path
+        snapshot = {
+            "tenant_id": str(document.get("tenant_id", "") or manifest.get("tenant", "")),
+            "nodes": list(document.get("nodes", [])),
+            "edges": list(document.get("edges", [])),
+            "transcripts": list(document.get("transcripts", [])),
+            "context_windows": list(document.get("context_windows", [])),
+        }
+        return write_abhi_document(snapshot, output_path=output_path, passphrase=passphrase)
+    else:
+        raise SchemaVersionError(
+            f"Upgrade from {current_version} to {target_version} is not supported."
+        )
+
+
+def serialize_abhi_diff(result: Any, *, fmt: str = "human", max_chars: int = 4000) -> str:
+    if fmt == "json":
+        return json.dumps(result.model_dump(mode="json"), indent=2, default=str)
+    # human format: git-diff-style
+    lines = [f"--- {result.input_path_a}\n", f"+++ {result.input_path_b}\n"]
+    changed_count = 0
+    truncated_after = 50
+    if hasattr(result, "node_records"):
+        for record in result.node_records:
+            if record.classification == "identical":
+                continue
+            changed_count += 1
+            label = getattr(record, "label", record.node_id)
+            prefix = {"added": "+", "removed": "-", "modified": "~"}.get(record.classification, "?")
+            lines.append(f"{prefix} node {record.node_id} ({label})\n")
+            if changed_count <= truncated_after:
+                for delta in record.deltas:
+                    lines.append(f"    {delta.field}: {delta.old_value!r} → {delta.new_value!r}\n")
+        for record in result.edge_records:
+            if record.classification == "identical":
+                continue
+            changed_count += 1
+            prefix = {"added": "+", "removed": "-", "modified": "~"}.get(record.classification, "?")
+            lines.append(f"{prefix} edge {record.edge_id}\n")
+            if changed_count <= truncated_after:
+                for delta in record.deltas:
+                    lines.append(f"    {delta.field}: {delta.old_value!r} → {delta.new_value!r}\n")
+    else:
+        for nid in result.nodes_added:
+            lines.append(f"+ node {nid}\n")
+            changed_count += 1
+        for nid in result.nodes_removed:
+            lines.append(f"- node {nid}\n")
+            changed_count += 1
+        for nid in result.nodes_updated:
+            lines.append(f"~ node {nid}\n")
+            changed_count += 1
+    if changed_count > truncated_after:
+        lines.append(f"\n... and {changed_count - truncated_after} more changes omitted\n")
+    output = "".join(lines)
+    if len(output) > max_chars:
+        output = output[:max_chars - len("\n[output truncated]")] + "\n[output truncated]"
+    return output
+
+
+def serialize_abhi_merge(result: Any, *, fmt: str = "human") -> str:
+    if fmt == "json":
+        return json.dumps(result.model_dump(mode="json"), indent=2, default=str)
+    prefix = "[DRY RUN] " if result.dry_run else ""
+    parts = [f"{prefix}Merged: {result.nodes_merged} nodes, {result.edges_merged} edges\n"]
+    if result.conflict_records:
+        parts.append(f"\nConflicts ({len(result.conflict_records)}):\n")
+        for r in result.conflict_records:
+            parts.append(
+                f"  {r.object_type} {r.object_id} field={r.field}: "
+                f"left={r.left_value!r} right={r.right_value!r} resolved_by={r.resolved_by}\n"
+            )
+    if result.hash_verified:
+        parts.append("\nHash verified: ✓\n")
+    return "".join(parts)
 
 
 def _with_compat_views(document: dict[str, Any]) -> dict[str, Any]:

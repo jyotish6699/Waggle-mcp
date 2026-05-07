@@ -8,6 +8,7 @@ import pytest
 from waggle.orchestrator import (
     AsyncMemoryOrchestrator,
     ConversationTurn,
+    MemoryPolicy,
     MemoryScope,
     RetrieveRequest,
 )
@@ -147,3 +148,28 @@ async def test_build_context_applies_token_budget() -> None:
     assert query_call["max_nodes"] == 4
     assert query_call["max_depth"] == 1
     assert query_call["project"] == "MCP"
+
+
+def test_memory_policy_is_durable_only_by_default() -> None:
+    policy = MemoryPolicy()
+    scope = MemoryScope(project="MCP", session_id="thread-3", agent_id="codex")
+
+    durable = policy.plan_ingest(
+        ConversationTurn(
+            user_message="We decided to publish the package after CI passes.",
+            assistant_response="Understood. I'll remember that release decision.",
+        ),
+        scope,
+    )
+    filler = policy.plan_ingest(
+        ConversationTurn(
+            user_message="That walkthrough was really interesting and detailed.",
+            assistant_response="Glad it helped. Let me know if you want more examples.",
+        ),
+        scope,
+    )
+
+    assert durable.should_ingest is True
+    assert durable.reason == "durable signal detected"
+    assert filler.should_ingest is False
+    assert filler.reason == "durable-only policy: no durable signal"

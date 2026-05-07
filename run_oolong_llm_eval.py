@@ -38,7 +38,7 @@ from waggle.oolong_benchmark import load_oolong_examples, _index_context_window
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "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")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_MODEL_PAIRS = "llama-3.1-8b-instant"   # fast + low TPM
 GROQ_MODEL_SYNTH = "llama-3.1-8b-instant"   # same model, consistent comparison
 

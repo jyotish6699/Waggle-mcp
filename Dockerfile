@@ -35,7 +35,7 @@ LABEL org.opencontainers.image.title="waggle-mcp" \
       org.opencontainers.image.authors="Abhigyan Shekhar" \
       org.opencontainers.image.url="https://github.com/Abhigyan-Shekhar/Waggle-mcp" \
       org.opencontainers.image.source="https://github.com/Abhigyan-Shekhar/Waggle-mcp" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # ── Cache directories (overridable via env / volume mounts) ──────────────────
 # The model is baked in; /cache is a volume for runtime persistence of

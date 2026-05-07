@@ -35,6 +35,9 @@ class AppConfig:
     neo4j_username: str
     neo4j_password: str
     neo4j_database: str
+    retention_enabled: bool = False
+    retention_days: int = 90
+    retention_prune_interval_hours: int = 24
     recency_half_life_days: float = 30.0
     tiered_retrieval: bool = False
     tiered_retrieval_top_k_windows: int = 3
@@ -47,6 +50,11 @@ class AppConfig:
     hybrid_rerank_top_k_in: int = 20
     hybrid_rerank_top_k_out: int = 5
     startup_mode: str = STARTUP_MODE_NORMAL  # fast | normal | strict
+    # Canonicalization-at-write dedup threshold.
+    # Nodes with cosine similarity >= this value (and matching node_type + scope)
+    # are merged at write time instead of creating a duplicate.
+    # Must be >= 0.85 to avoid false-positive merges.
+    dedup_threshold: float = 0.88
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -81,9 +89,13 @@ class AppConfig:
             neo4j_username=os.environ.get("WAGGLE_NEO4J_USERNAME", "").strip(),
             neo4j_password=os.environ.get("WAGGLE_NEO4J_PASSWORD", ""),
             neo4j_database=os.environ.get("WAGGLE_NEO4J_DATABASE", "").strip(),
+            retention_enabled=os.environ.get("WAGGLE_RETENTION_ENABLED", "false").strip().lower() == "true",
+            retention_days=int(os.environ.get("WAGGLE_RETENTION_DAYS", "90")),
+            retention_prune_interval_hours=int(os.environ.get("WAGGLE_RETENTION_PRUNE_INTERVAL_HOURS", "24")),
             startup_mode=os.environ.get("WAGGLE_STARTUP_MODE", STARTUP_MODE_NORMAL).strip().lower(),
             tiered_retrieval=os.environ.get("WAGGLE_TIERED_RETRIEVAL", "false").strip().lower() == "true",
             tiered_retrieval_top_k_windows=int(os.environ.get("WAGGLE_TIERED_TOP_K_WINDOWS", "3")),
+            dedup_threshold=float(os.environ.get("WAGGLE_DEDUP_THRESHOLD", "0.88")),
         )
         config.validate()
         return config
@@ -108,6 +120,10 @@ class AppConfig:
                 f"Unsupported WAGGLE_STARTUP_MODE: {self.startup_mode!r}. "
                 f"Valid values: fast, normal, strict."
             )
+        if self.dedup_threshold < 0.85:
+            raise ValidationFailure(
+                "WAGGLE_DEDUP_THRESHOLD must be >= 0.85 to avoid false-positive merges."
+            )
         if self.recency_half_life_days <= 0:
             raise ValidationFailure("WAGGLE_RECENCY_HALF_LIFE_DAYS must be greater than 0.")
         if self.tiered_retrieval_top_k_windows < 1:
@@ -116,6 +132,10 @@ class AppConfig:
             raise ValidationFailure("WAGGLE_HYBRID_RERANK_TOP_K_IN must be at least 1.")
         if self.hybrid_rerank_top_k_out < 1:
             raise ValidationFailure("WAGGLE_HYBRID_RERANK_TOP_K_OUT must be at least 1.")
+        if self.retention_days < 1:
+            raise ValidationFailure("WAGGLE_RETENTION_DAYS must be at least 1.")
+        if self.retention_prune_interval_hours < 1:
+            raise ValidationFailure("WAGGLE_RETENTION_PRUNE_INTERVAL_HOURS must be at least 1.")
 
     def hybrid_retrieval_config(self) -> HybridRetrievalConfig:
         return HybridRetrievalConfig(

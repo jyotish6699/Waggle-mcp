@@ -120,6 +120,11 @@ def test_tool_schemas_are_glama_friendly(tmp_path: Path) -> None:
 def test_parser_accepts_graph_editor_commands() -> None:
     parser = _build_parser()
 
+    create_api_key_args = parser.parse_args(["create-api-key", "--tenant-id", "workspace-a", "--name", "prod-agent", "--expires-in-days", "30", "--created-by", "ops@example.com", "--scopes", "graph:read,admin:read"])
+    list_audit_args = parser.parse_args(["list-audit-events", "--tenant-id", "workspace-a", "--type", "api_key.created", "--limit", "25"])
+    retention_status_args = parser.parse_args(["retention-status", "--tenant-id", "workspace-a"])
+    set_retention_args = parser.parse_args(["set-retention", "--tenant-id", "workspace-a", "--enabled", "--days", "90", "--interval-hours", "12"])
+    prune_retention_args = parser.parse_args(["prune-retention", "--tenant-id", "workspace-a", "--batch-size", "250"])
     edit_args = parser.parse_args(["edit-graph", "--port", "8787", "--no-open"])
     view_args = parser.parse_args(["view-graph"])
     diff_args = parser.parse_args(["diff", "--file-a", "a.abhi", "--file-b", "b.abhi"])
@@ -128,24 +133,29 @@ def test_parser_accepts_graph_editor_commands() -> None:
     )
     query_args = parser.parse_args(["query", "--input", "memory.abhi", "--query-id", "q1"])
     load_chunks_args = parser.parse_args(["load-chunks", "--input", "memory.abhi", "--chunk-id", "decision_1"])
+    checkpoint_args = parser.parse_args(["checkpoint-context", "--project", "MCP", "--session-id", "thread-1", "--output", "handoff.abhi"])
+    clear_session_args = parser.parse_args(["clear-session", "--session-id", "thread-1", "--yes"])
+    clear_project_args = parser.parse_args(["clear-project", "--project", "MCP", "--yes"])
+    clear_all_args = parser.parse_args(["clear-all", "--yes"])
     push_args = parser.parse_args(["push", "--client-secret-path", "client.json", "--folder-id", "folder123"])
     pull_args = parser.parse_args(["pull", "file123", "--client-secret-path", "client.json"])
     share_args = parser.parse_args(["share", "file123", "--client-secret-path", "client.json"])
-    oolong_args = parser.parse_args(
-        [
-            "benchmark-oolong",
-            "oolong.jsonl",
-            "--eval-mode",
-            "waggle_rlm",
-            "--llm-backend",
-            "gemini",
-            "--llm-model",
-            "gemini-2.5-flash-lite",
-            "--llm-api-key-env",
-            "GEMINI_API_KEY",
-        ]
-    )
 
+    assert create_api_key_args.command == "create-api-key"
+    assert create_api_key_args.expires_in_days == 30
+    assert create_api_key_args.created_by == "ops@example.com"
+    assert create_api_key_args.scopes == "graph:read,admin:read"
+    assert list_audit_args.command == "list-audit-events"
+    assert list_audit_args.event_type == "api_key.created"
+    assert list_audit_args.limit == 25
+    assert retention_status_args.command == "retention-status"
+    assert retention_status_args.tenant_id == "workspace-a"
+    assert set_retention_args.command == "set-retention"
+    assert set_retention_args.enabled is True
+    assert set_retention_args.days == 90
+    assert set_retention_args.interval_hours == 12
+    assert prune_retention_args.command == "prune-retention"
+    assert prune_retention_args.batch_size == 250
     assert edit_args.command == "edit-graph"
     assert edit_args.port == 8787
     assert edit_args.open is False
@@ -159,6 +169,17 @@ def test_parser_accepts_graph_editor_commands() -> None:
     assert query_args.query_id == "q1"
     assert load_chunks_args.command == "load-chunks"
     assert load_chunks_args.chunk_ids == ["decision_1"]
+    assert checkpoint_args.command == "checkpoint-context"
+    assert checkpoint_args.project == "MCP"
+    assert checkpoint_args.session_id == "thread-1"
+    assert clear_session_args.command == "clear-session"
+    assert clear_session_args.session_id == "thread-1"
+    assert clear_session_args.yes is True
+    assert clear_project_args.command == "clear-project"
+    assert clear_project_args.project == "MCP"
+    assert clear_project_args.yes is True
+    assert clear_all_args.command == "clear-all"
+    assert clear_all_args.yes is True
     assert push_args.command == "push"
     assert push_args.encrypt is True
     assert push_args.folder_id == "folder123"
@@ -166,13 +187,6 @@ def test_parser_accepts_graph_editor_commands() -> None:
     assert pull_args.file_ref == "file123"
     assert share_args.command == "share"
     assert share_args.file_ref == "file123"
-    assert oolong_args.command == "benchmark-oolong"
-    assert oolong_args.dataset_path == "oolong.jsonl"
-    assert oolong_args.eval_mode == "waggle_rlm"
-    assert oolong_args.llm_backend == "gemini"
-    assert oolong_args.llm_model == "gemini-2.5-flash-lite"
-    assert oolong_args.llm_api_key_env == "GEMINI_API_KEY"
-    assert oolong_args.rlm_max_iterations == 6
 
 
 def test_doctor_flags_mixed_embedding_model_ids(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -274,81 +288,114 @@ def test_doctor_fix_reembeds_mixed_embedding_model_ids(tmp_path: Path, capsys: p
     assert repaired["transcript_stale_rows"] == 0
 
 
-def test_run_admin_command_benchmark_oolong(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    config = AppConfig(
-        backend="sqlite",
-        transport="stdio",
-        model_name="fake-model",
-        db_path=str(tmp_path / "server-memory.db"),
-        default_tenant_id="local-default",
-        http_host="127.0.0.1",
-        http_port=8080,
-        log_level="INFO",
-        rate_limit_rpm=120,
-        write_rate_limit_rpm=60,
-        max_concurrent_requests=8,
-        max_payload_bytes=1024 * 1024,
-        request_timeout_seconds=30,
-        export_dir=None,
-        neo4j_uri="",
-        neo4j_username="",
-        neo4j_password="",
-        neo4j_database="",
+
+def test_create_and_list_api_keys_cli_redacts_hash(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    app = make_app(tmp_path)
+
+    create_args = SimpleNamespace(
+        command="create-api-key",
+        tenant_id="workspace-a",
+        name="prod-agent",
+        expires_in_days=30,
+        created_by="ops@example.com",
     )
-
-    class FakeReport:
-        def to_dict(self) -> dict[str, object]:
-            return {"case_count": 1, "accuracy": 1.0, "eval_mode": "retrieval_only"}
-
-    captured: dict[str, object] = {}
-
-    def fake_evaluate_oolong(*args: object, **kwargs: object) -> FakeReport:
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return FakeReport()
-
-    monkeypatch.setattr("waggle.server.evaluate_oolong", fake_evaluate_oolong)
-    monkeypatch.setattr("waggle.server.run_gemini_one_shot", lambda **_: "coffee")
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-
-    args = SimpleNamespace(
-        command="benchmark-oolong",
-        dataset_path="oolong.jsonl",
-        dataset_kind="auto",
-        context_field="auto",
-        eval_mode="retrieval_only",
-        llm_command="",
-        llm_backend="gemini",
-        llm_model="gemini-2.5-flash-lite",
-        llm_api_key_env="GEMINI_API_KEY",
-        llm_max_tokens=512,
-        llm_timeout_seconds=60.0,
-        retrieval_mode="graph",
-        max_nodes=8,
-        max_depth=1,
-        chunk_lines=12,
-        chunk_overlap_lines=3,
-        rlm_system_prompt_file="",
-        rlm_max_iterations=6,
-        limit=None,
-        output="",
-    )
-
-    exit_code = _run_admin_command(config, args)
-    stdout = capsys.readouterr().out
+    exit_code = _run_admin_command(app.config, create_args)
+    create_payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
-    assert captured["args"] == ("oolong.jsonl",)
-    assert captured["kwargs"]["eval_mode"] == "retrieval_only"
-    assert captured["kwargs"]["retrieval_mode"] == "graph"
-    assert callable(captured["kwargs"]["llm_answerer"])
-    assert captured["kwargs"]["rlm_backend"] == "gemini"
-    assert captured["kwargs"]["rlm_backend_kwargs"] == {
-        "api_key": "test-key",
-        "model_name": "gemini-2.5-flash-lite",
-    }
-    assert '"accuracy": 1.0' in stdout
+    assert create_payload["prefix"].startswith("sk_live_")
+    assert create_payload["created_by"] == "ops@example.com"
+    assert create_payload["scopes"] == ["graph:read", "graph:write", "admin:read", "admin:write"]
+    assert "raw_api_key" in create_payload
+    assert "key_hash" not in create_payload
 
+    list_args = SimpleNamespace(command="list-api-keys", tenant_id="workspace-a")
+    exit_code = _run_admin_command(app.config, list_args)
+    listed = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert listed[0]["prefix"] == create_payload["prefix"]
+    assert listed[0]["created_by"] == "ops@example.com"
+    assert listed[0]["expires_at"] is not None
+    assert listed[0]["scopes"] == ["graph:read", "graph:write", "admin:read", "admin:write"]
+    assert "key_hash" not in listed[0]
+
+
+def test_retention_admin_commands_update_and_prune(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    app = make_app(tmp_path)
+    tenant_graph = app.graph.for_tenant("workspace-a")
+    old_time = "2026-01-01T00:00:00+00:00"
+    tenant_graph.add_node(label="Old fact", content="prune me", node_type=NodeType.FACT)
+    with tenant_graph._lock, tenant_graph._connect() as connection:  # noqa: SLF001 - test helper
+        connection.execute("UPDATE nodes SET created_at = ?, updated_at = ?", (old_time, old_time))
+
+    set_args = SimpleNamespace(
+        command="set-retention",
+        tenant_id="workspace-a",
+        enabled=True,
+        days=30,
+        interval_hours=24,
+    )
+    exit_code = _run_admin_command(app.config, set_args)
+    policy = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert policy["enabled"] is True
+    assert policy["retention_days"] == 30
+
+    prune_args = SimpleNamespace(
+        command="prune-retention",
+        tenant_id="workspace-a",
+        batch_size=1000,
+    )
+    exit_code = _run_admin_command(app.config, prune_args)
+    prune_payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert prune_payload["status"] == "completed"
+    assert prune_payload["deleted_nodes"] == 1
+    assert prune_payload["policy"]["last_pruned_at"] is not None
+
+    status_args = SimpleNamespace(command="retention-status", tenant_id="workspace-a")
+    exit_code = _run_admin_command(app.config, status_args)
+    status_payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert status_payload["enabled"] is True
+    assert status_payload["recent_runs"][0]["status"] == "completed"
+
+
+def test_audit_events_are_queryable_from_admin_cli(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    app = make_app(tmp_path)
+
+    create_args = SimpleNamespace(
+        command="create-api-key",
+        tenant_id="workspace-a",
+        name="prod-agent",
+        expires_in_days=30,
+        created_by="ops@example.com",
+    )
+    exit_code = _run_admin_command(app.config, create_args)
+    assert exit_code == 0
+    create_payload = json.loads(capsys.readouterr().out)
+
+    audit_args = SimpleNamespace(
+        command="list-audit-events",
+        tenant_id="workspace-a",
+        limit=20,
+        event_type="api_key.created",
+        actor_id="",
+        resource_id=create_payload["api_key_id"],
+        resource_type="api_key",
+        status="",
+    )
+    exit_code = _run_admin_command(app.config, audit_args)
+    events = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert events[0]["event_type"] == "api_key.created"
+    assert events[0]["resource_id"] == create_payload["api_key_id"]
+    assert events[0]["metadata"]["prefix"] == create_payload["prefix"]
 
 def test_run_graph_editor_command_opens_browser_and_starts_uvicorn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = AppConfig(
@@ -780,7 +827,89 @@ def test_export_context_bundle_tool(tmp_path: Path) -> None:
     assert "Context Bundle Export" in result.content[0].text
 
 
-def test_get_node_history_tool(tmp_path: Path) -> None:
+def test_commit_tool_git_vocabulary(tmp_path: Path) -> None:
+    """waggle commit (new name) produces the same .abhi output as export_abhi (old name)."""
+    app = make_app(tmp_path)
+    app.graph.add_node(
+        label="Commit test decision",
+        content="We decided to use the git vocabulary for the CLI.",
+        node_type=NodeType.DECISION,
+    )
+
+    # New canonical name — should produce an .abhi file
+    result = app.handle_tool_call("commit", {"output_path": str(tmp_path / "via_commit.abhi")})
+    assert result.isError is False
+    assert result.structuredContent["commit_format"] == "abhi"
+    assert Path(result.structuredContent["output_path"]).exists()
+    assert result.structuredContent["node_count"] >= 1
+
+    # Legacy name — must still work and produce the same format
+    result_legacy = app.handle_tool_call("export_abhi", {"output_path": str(tmp_path / "via_export_abhi.abhi")})
+    assert result_legacy.isError is False
+    assert result_legacy.structuredContent["commit_format"] == "abhi"
+    assert Path(result_legacy.structuredContent["output_path"]).exists()
+
+
+def test_export_context_bundle_alias_routes_to_bundle(tmp_path: Path) -> None:
+    """export_context_bundle (legacy) → commit --commit_format=bundle; mode field present."""
+    app = make_app(tmp_path)
+    app.graph.add_node(
+        label="Bundle alias test",
+        content="Portable context export ships first.",
+        node_type=NodeType.DECISION,
+    )
+
+    # Legacy name with no commit_format — must default to bundle path
+    result = app.handle_tool_call(
+        "export_context_bundle",
+        {"mode": "query", "query": "portable export", "format": "both", "output_path": str(tmp_path / "bundle")},
+    )
+    assert result.isError is False
+    assert result.structuredContent["mode"] == "query"
+    assert result.structuredContent["node_count"] >= 1
+    assert Path(result.structuredContent["markdown_path"]).exists()
+
+
+def test_export_context_bundle_caller_override_wins(tmp_path: Path) -> None:
+    """Caller passing commit_format='abhi' via the legacy name overrides the default bundle format."""
+    app = make_app(tmp_path)
+    app.graph.add_node(
+        label="Override test",
+        content="Caller-provided args must win over alias defaults.",
+        node_type=NodeType.DECISION,
+    )
+
+    # Caller explicitly requests abhi format even though the legacy name defaults to bundle
+    result = app.handle_tool_call(
+        "export_context_bundle",
+        {"commit_format": "abhi", "output_path": str(tmp_path / "override.abhi")},
+    )
+    assert result.isError is False
+    assert result.structuredContent["commit_format"] == "abhi"
+    assert Path(result.structuredContent["output_path"]).exists()
+
+
+def test_git_vocabulary_pull_aliases(tmp_path: Path) -> None:
+    """import_abhi and import_graph_backup both route to pull with the right pull_format."""
+    app = make_app(tmp_path)
+    app.graph.add_node(
+        label="Pull alias test",
+        content="Both import aliases must route correctly.",
+        node_type=NodeType.DECISION,
+    )
+
+    # Commit an .abhi file to pull back in
+    commit_result = app.handle_tool_call("commit", {"output_path": str(tmp_path / "mem.abhi")})
+    assert commit_result.isError is False
+    abhi_path = commit_result.structuredContent["output_path"]
+
+    # import_abhi → pull --pull_format=abhi
+    pull_result = app.handle_tool_call("import_abhi", {"input_path": abhi_path})
+    assert pull_result.isError is False
+    assert pull_result.structuredContent["pull_format"] == "abhi"
+
+
+
     app = make_app(tmp_path)
     observed = app.handle_tool_call(
         "observe_conversation",
@@ -962,6 +1091,77 @@ def test_export_context_bundle_cli_command(tmp_path: Path, capsys: pytest.Captur
     assert payload["mode"] == "graph"
     assert Path(payload["markdown_path"]).exists()
     assert Path(payload["json_path"]).exists()
+
+
+def test_checkpoint_context_cli_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    app = make_app(tmp_path)
+    app.graph.add_node(
+        label="Checkpoint Decision",
+        content="Use scoped checkpoints during context switches.",
+        node_type=NodeType.DECISION,
+        project="MCP",
+        session_id="thread-1",
+    )
+
+    args = SimpleNamespace(
+        command="checkpoint-context",
+        output_path=str(tmp_path / "handoff.abhi"),
+        project="MCP",
+        agent_id="",
+        session_id="thread-1",
+        scope="",
+        since_date="",
+        include_embeddings=True,
+        encrypt=False,
+        sign=False,
+        signing_key_dir="~/.waggle/keys",
+        redact_patterns=[],
+        passphrase_env="",
+        force=False,
+    )
+    exit_code = _run_admin_command(app.config, args)
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["checkpoint_scope"] == "session"
+
+
+def test_clear_session_project_and_all_tools_require_confirm_and_delete_data(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    app.graph.observe_conversation(
+        user_message="Use Redis for caching.",
+        assistant_response="Noted.",
+        project="alpha",
+        session_id="sess-1",
+    )
+    app.graph.observe_conversation(
+        user_message="Use Kafka for ingestion.",
+        assistant_response="Noted.",
+        project="beta",
+        session_id="sess-2",
+    )
+
+    denied = app.handle_tool_call("clear_session", {"session_id": "sess-1"})
+    assert denied.isError is True
+
+    cleared_session = app.handle_tool_call("clear_session", {"session_id": "sess-1", "confirm": True})
+    assert cleared_session.structuredContent["scope"] == "session"
+    assert app.graph.query(query="redis", project="alpha", session_id="sess-1", max_nodes=5).nodes == []
+    assert app.graph.query(query="kafka", project="beta", session_id="sess-2", max_nodes=5).nodes
+
+    cleared_project = app.handle_tool_call("clear_project", {"project": "beta", "confirm": True})
+    assert cleared_project.structuredContent["scope"] == "project"
+    assert app.graph.query(query="kafka", project="beta", max_nodes=5).nodes == []
+
+    app.graph.observe_conversation(
+        user_message="Use Postgres for storage.",
+        assistant_response="Noted.",
+        project="gamma",
+        session_id="sess-3",
+    )
+    cleared_all = app.handle_tool_call("clear_all", {"confirm": True})
+    assert cleared_all.structuredContent["scope"] == "all"
+    assert app.graph.get_stats().total_nodes == 0
 
 
 def test_markdown_vault_tool_and_cli_command(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

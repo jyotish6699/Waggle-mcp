@@ -2,15 +2,22 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
+
+from waggle.errors import AuthorizationError
 
 
 def utc_now() -> datetime:
     """Return a timezone-aware UTC timestamp."""
     return datetime.now(timezone.utc)
+
+
+def default_api_key_scopes() -> list[str]:
+    return ["graph:read", "graph:write", "admin:read", "admin:write"]
 
 
 class NodeType(str, Enum):
@@ -53,6 +60,9 @@ class Node(BaseModel):
     content: str
     node_type: NodeType
     tags: list[str] = Field(default_factory=list)
+    # aliases: all phrasings that have been merged into this canonical node.
+    # Populated automatically during dedup; also updated by canonicalize_node.
+    aliases: list[str] = Field(default_factory=list)
     source_prompt: str = ""
     embedding_model_id: str = ""
     embedding_dim: int = 0
@@ -264,6 +274,27 @@ class NodeStoreResult(BaseModel):
     conflicts: list[ConflictRecord] = Field(default_factory=list)
 
 
+class CanonicalizeResult(BaseModel):
+    canonical_node: Node
+    merged_node_ids: list[str] = Field(default_factory=list)
+    edges_repointed: int = 0
+    aliases_added: list[str] = Field(default_factory=list)
+
+
+class DedupCandidatePair(BaseModel):
+    node_id_a: str
+    node_id_b: str
+    label_a: str
+    label_b: str
+    similarity: float
+
+
+class DedupCandidatesResult(BaseModel):
+    pairs: list[DedupCandidatePair] = Field(default_factory=list)
+    threshold: float = 0.85
+    total_nodes_scanned: int = 0
+
+
 class BackupResult(BaseModel):
     output_path: str
     tenant_id: str = ""
@@ -284,6 +315,7 @@ class AbhiExportResult(BaseModel):
     encrypted: bool = False
     encryption_algorithm: str = ""
     executed_actions: list[str] = Field(default_factory=list)
+    export_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class ImportResult(BaseModel):
@@ -324,6 +356,10 @@ class AbhiValidationResult(BaseModel):
     embedding_count: int = 0
     encrypted: bool = False
     encryption_algorithm: str = ""
+    # new fields
+    dangling_edges: list[str] = Field(default_factory=list)
+    dangling_edge_count: int = 0
+    boundary_warning: str = ""
 
 
 class AbhiInspectResult(BaseModel):
@@ -377,6 +413,12 @@ class AbhiMergeResult(BaseModel):
     encrypted: bool = False
     encryption_algorithm: str = ""
     executed_actions: list[str] = Field(default_factory=list)
+    # new fields
+    conflict_records: list["MergeConflictRecord"] = Field(default_factory=list)
+    dry_run: bool = False
+    hash_verified: bool = False
+    dangling_edges_dropped: list[str] = Field(default_factory=list)
+    contradict_edges_added: int = 0
 
 
 class AbhiQueryResult(BaseModel):
@@ -438,6 +480,12 @@ class ObservationResult(BaseModel):
     created_count: int = 0
     reused_count: int = 0
     conflicts: list[ConflictRecord] = Field(default_factory=list)
+    # New fields for verbatim-first architecture with async extraction enrichment
+    turn_id: str = ""  # UUID for the turn, persisted before extraction
+    verbatim_stored: bool = True  # Whether the raw turn was successfully persisted
+    nodes_extracted: int = 0  # Number of nodes successfully extracted and stored
+    edges_inferred: int = 0  # Number of edges inferred between extracted nodes
+    extraction_errors: list[str] = Field(default_factory=list)  # Non-fatal extraction errors logged for diagnostics
 
 
 class GraphDiffResult(BaseModel):
@@ -582,15 +630,86 @@ class ApiKeyRecord(BaseModel):
     api_key_id: str
     tenant_id: str
     key_hash: str
+    prefix: str = ""
     name: str = ""
     status: str = "active"
     created_at: datetime = Field(default_factory=utc_now)
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
     last_used_at: datetime | None = None
+    created_by: str = ""
+    scopes: list[str] = Field(default_factory=default_api_key_scopes)
+
+    @field_validator("scopes", mode="before")
+    @classmethod
+    def _normalize_scopes(cls, value: Any) -> list[str]:
+        if value is None:
+            return default_api_key_scopes()
+        if isinstance(value, str):
+            items = [item.strip() for item in value.split(",")]
+        else:
+            items = [str(item).strip() for item in value]
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            if not item or item in seen:
+                continue
+            normalized.append(item)
+            seen.add(item)
+        return normalized or default_api_key_scopes()
+
+    def require_scope(self, scope: str) -> None:
+        if scope not in self.scopes:
+            raise AuthorizationError(f"API key is missing required scope: {scope}")
 
 
 class ApiKeyCreateResult(BaseModel):
     record: ApiKeyRecord
     raw_api_key: str
+
+
+class RetentionPolicyRecord(BaseModel):
+    tenant_id: str
+    enabled: bool = False
+    retention_days: int = 90
+    prune_interval_hours: int = 24
+    last_pruned_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
+class RetentionPruneRunRecord(BaseModel):
+    run_id: str = Field(default_factory=lambda: str(uuid4()))
+    tenant_id: str
+    status: str = "completed"
+    cutoff: datetime
+    started_at: datetime = Field(default_factory=utc_now)
+    completed_at: datetime | None = None
+    deleted_nodes: int = 0
+    deleted_edges: int = 0
+    deleted_transcripts: int = 0
+    deleted_context_windows: int = 0
+    deleted_context_window_edges: int = 0
+    deleted_exports: int = 0
+    duration_ms: int = 0
+    error_message: str = ""
+
+
+class AuditEventRecord(BaseModel):
+    event_id: str = Field(default_factory=lambda: str(uuid4()))
+    tenant_id: str
+    event_type: str
+    actor_type: str = "system"
+    actor_id: str = ""
+    api_key_id: str = ""
+    resource_type: str = ""
+    resource_id: str = ""
+    action: str = ""
+    status: str = "success"
+    ip_address: str = ""
+    user_agent: str = ""
+    created_at: datetime = Field(default_factory=utc_now)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class TranscriptRecord(BaseModel):
@@ -750,3 +869,122 @@ class TranscriptIngestionResult(BaseModel):
     json_path: Optional[str] = None
     export_node_count: int = 0
     export_edge_count: int = 0
+    checkpoint_path: Optional[str] = None
+    checkpoint_scope: str = ""
+
+
+class ClearScopeResult(BaseModel):
+    scope: str
+    project: str = ""
+    session_id: str = ""
+    deleted_nodes: int = 0
+    deleted_edges: int = 0
+    deleted_transcripts: int = 0
+    deleted_context_windows: int = 0
+    deleted_context_window_edges: int = 0
+    deleted_repos: int = 0
+    deleted_graph_ui_rows: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Diff / Merge models (abhi-diff-merge-tool)
+# ---------------------------------------------------------------------------
+
+
+class FieldDelta(BaseModel):
+    field: str                  # e.g. "content", "tags", "metadata.source_app"
+    old_value: Any              # None when the object was added
+    new_value: Any              # None when the object was removed
+
+
+class NodeDiffRecord(BaseModel):
+    node_id: str
+    classification: Literal["added", "removed", "modified", "identical"]
+    label: str = ""             # label or content[:60] for display
+    deltas: list[FieldDelta] = Field(default_factory=list)
+
+
+class EdgeDiffRecord(BaseModel):
+    edge_id: str
+    classification: Literal["added", "removed", "modified", "identical"]
+    deltas: list[FieldDelta] = Field(default_factory=list)
+
+
+class MergeConflictRecord(BaseModel):
+    conflict_id: str = Field(default_factory=lambda: str(uuid4()))
+    object_id: str              # node or edge ID
+    object_type: Literal["node", "edge"]
+    field: str                  # e.g. "content", "tags"
+    base_value: Any             # value in the base document (None if absent)
+    left_value: Any             # value in the left document
+    right_value: Any            # value in the right document
+    resolved_by: str = ""       # set after resolution
+    resolved_value: Any = None  # the value selected after resolution
+
+
+class FieldLevelDiffResult(BaseModel):
+    input_path_a: str
+    input_path_b: str
+    input_path_base: str = ""           # empty string for two-way diff
+    abhi_spec_version_a: str = ""
+    abhi_spec_version_b: str = ""
+    diff_mode: Literal["two_way", "three_way"] = "two_way"
+
+    # Node-level summary (IDs only, for backward compat)
+    nodes_added: list[str] = Field(default_factory=list)
+    nodes_removed: list[str] = Field(default_factory=list)
+    nodes_updated: list[str] = Field(default_factory=list)
+
+    # Edge-level summary (IDs only)
+    edges_added: list[str] = Field(default_factory=list)
+    edges_removed: list[str] = Field(default_factory=list)
+    edges_updated: list[str] = Field(default_factory=list)
+
+    # Field-level detail
+    node_records: list[NodeDiffRecord] = Field(default_factory=list)
+    edge_records: list[EdgeDiffRecord] = Field(default_factory=list)
+
+    # Three-way only
+    conflict_records: list[MergeConflictRecord] = Field(default_factory=list)
+
+    # Warnings
+    warnings: list[str] = Field(default_factory=list)
+    schema_version_mismatch: bool = False
+
+
+class MergeStrategyFieldOverride(BaseModel):
+    field: str                  # e.g. "tags", "metadata.source_app"
+    strategy: str               # "prefer_left" | "prefer_right" | "last_write_wins" | "contradict"
+
+
+class MergeStrategyTypeOverride(BaseModel):
+    node_type: str              # e.g. "decision", "fact"
+    strategy: str
+
+
+class MergeStrategyConfig(BaseModel):
+    default_strategy: str = "contradict"
+    field_overrides: list[MergeStrategyFieldOverride] = Field(default_factory=list)
+    type_overrides: list[MergeStrategyTypeOverride] = Field(default_factory=list)
+
+    @classmethod
+    def load(cls, path: str | Path | None = None) -> "MergeStrategyConfig":
+        """
+        Load from path, or from ~/.waggle/merge-strategies.yaml if path is None.
+        Returns a default config if the file does not exist.
+        """
+        import os
+        if path is None:
+            config_path = Path(os.path.expanduser("~/.waggle/merge-strategies.yaml"))
+        else:
+            config_path = Path(path)
+        if not config_path.exists():
+            return cls()
+        try:
+            import yaml  # type: ignore[import]
+            data = yaml.safe_load(config_path.read_text())
+            if isinstance(data, dict):
+                return cls(**data)
+        except Exception:
+            pass
+        return cls()

@@ -279,22 +279,31 @@ class HybridRetriever:
 
     def _load_turn_pairs(self, *, project: str, agent_id: str, session_id: str) -> list[TurnPairCandidate]:
         with self.graph._lock, self.graph._connect() as connection:  # noqa: SLF001
+            filters = ["tenant_id = ?"]
+            params: list[Any] = [self.graph.tenant_id]
+            if project.strip():
+                filters.append("project = ?")
+                params.append(project.strip())
+            if session_id.strip():
+                filters.append("session_id = ?")
+                params.append(session_id.strip())
+            elif agent_id.strip():
+                filters.append("agent_id = ?")
+                params.append(agent_id.strip())
             rows = connection.execute(
-                """
+                f"""
                 SELECT id, tenant_id, agent_id, project, session_id, observed_at, turn_index, role,
                        transcript_text, embedding, embedding_model_id, embedding_dim, content_hash, turn_pair_id, metadata
                 FROM transcript_records
-                WHERE tenant_id = ?
+                WHERE {" AND ".join(filters)}
                 ORDER BY observed_at DESC, turn_index DESC
                 """,
-                (self.graph.tenant_id,),
+                tuple(params),
             ).fetchall()
 
         grouped: dict[str, list[Any]] = defaultdict(list)
         for row in rows:
             record = self.graph._row_to_transcript_record(row)  # noqa: SLF001
-            if not self.graph._transcript_scope_matches(record, agent_id=agent_id, project=project, session_id=session_id):  # noqa: SLF001
-                continue
             turn_pair_id = str(record.turn_pair_id or "").strip()
             if not turn_pair_id:
                 turn_pair_id = f"{record.session_id or 'session'}:{record.turn_index}"

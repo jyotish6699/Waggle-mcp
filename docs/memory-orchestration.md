@@ -8,6 +8,7 @@ This architecture removes manual memory tool calls from end users. The chat runt
 - Better UX: users chat normally; no `store_node` micromanagement.
 - Lower token burn: ingestion is async and retrieval is bounded by budget.
 - Auditable operation: each turn produces a clear ingest/retrieve decision.
+- Better handoff behavior: SQLite stays live during work, `.abhi` is used only for explicit checkpoints.
 
 ## Runtime flow
 
@@ -38,6 +39,7 @@ Use [orchestrator.py](../src/waggle/orchestrator.py) and [chat_runtime.py](../sr
 - `RetrieveRequest`: token-budgeted query request.
 - `ConversationTurn.turn_id`: optional idempotency key for deduplicating retries.
 - `OrchestratedChatRuntime`: concrete chat loop integration (retrieve before answer, ingest after answer).
+  - `checkpoint_current_context(...)`: flush pending ingest and export a scoped `.abhi` checkpoint for handoff.
 
 ## Integration skeleton
 
@@ -73,10 +75,11 @@ asyncio.run(main())
 ## Operational guidelines
 
 - Ingest policy:
-  - ingest decisions/preferences/constraints
+  - ingest decisions/preferences/constraints/requirements/corrections/project facts/meaningful outcomes
   - skip acknowledgements/chatter
   - guard ingest frequency with per-scope interval
   - pass a stable `turn_id` when the chat platform has message IDs
+  - default to durable-only structured ingest; do not treat every non-trivial turn as memory
 - Retrieval policy:
   - query only when user prompt is meaningful
   - cap context by token budget, then fit `max_nodes` and `max_depth`
@@ -84,6 +87,21 @@ asyncio.run(main())
 - Scope isolation:
   - always pass stable `project`, `agent_id`, and `session_id`
   - avoid global unscoped writes in shared environments
+
+## Checkpoint handoff
+
+- Use SQLite as the canonical live store while you keep working.
+- When switching session, app, or context window, checkpoint the active scope to `.abhi`.
+- Preferred CLI:
+  - `waggle-mcp checkpoint-context --project <project> --session-id <session> --output ./handoff.abhi`
+  - `waggle-mcp commit --project <project> --session-id <session> --scope session --output ./handoff.abhi`
+- Preferred runtime hook:
+  - call `await runtime.checkpoint_current_context(scope=scope, output_path="./handoff.abhi")` on pause, compact, or app switch
+- Preferred resume flow:
+  - call `await runtime.resume_context(scope=scope, checkpoint_path="./handoff.abhi")` to try scoped DB recall first and import the checkpoint only when the scope is empty
+- Resume order:
+  - same machine / shared DB path: use SQLite recall first
+  - different machine or explicit handoff: `waggle-mcp pull ./handoff.abhi`
 
 ## Next hardening steps
 

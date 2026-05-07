@@ -13,12 +13,14 @@ import numpy as np
 import pytest
 
 from waggle.abhi import (
+    ABHI_MAGIC,
     diff_abhi_files,
     execute_abhi_query,
     load_abhi_chunk_file,
     load_abhi_document,
     merge_abhi_files,
     query_abhi_file,
+    write_abhi_document,
 )
 from waggle.graph import MemoryGraph
 from waggle.models import NodeType, RelationType
@@ -224,6 +226,82 @@ def test_update_delete_and_stats(tmp_path: Path) -> None:
     assert graph.get_stats().total_nodes == 0
 
 
+def test_clear_session_removes_only_session_scoped_data(tmp_path: Path) -> None:
+    graph = make_graph(tmp_path)
+    graph.observe_conversation(
+        user_message="Use Redis for caching.",
+        assistant_response="Noted.",
+        project="alpha",
+        session_id="sess-a",
+    )
+    graph.observe_conversation(
+        user_message="Use Postgres for primary storage.",
+        assistant_response="Noted.",
+        project="alpha",
+        session_id="sess-b",
+    )
+
+    result = graph.clear_session(session_id="sess-a")
+
+    assert result.scope == "session"
+    assert result.session_id == "sess-a"
+    assert result.deleted_nodes >= 1
+    assert result.deleted_transcripts >= 2
+    assert graph.query(query="redis", project="alpha", session_id="sess-a", max_nodes=5).nodes == []
+    assert graph.query(query="postgres", project="alpha", session_id="sess-b", max_nodes=5).nodes
+
+
+def test_clear_project_removes_project_but_preserves_other_projects(tmp_path: Path) -> None:
+    graph = make_graph(tmp_path)
+    graph.add_node(
+        label="Alpha Cache",
+        content="Alpha uses Redis.",
+        node_type=NodeType.DECISION,
+        project="alpha",
+        session_id="sess-a",
+    )
+    graph.add_node(
+        label="Beta Queue",
+        content="Beta uses Kafka.",
+        node_type=NodeType.DECISION,
+        project="beta",
+        session_id="sess-b",
+    )
+    graph.observe_conversation(
+        user_message="Alpha uses Redis.",
+        assistant_response="Noted.",
+        project="alpha",
+        session_id="sess-a",
+    )
+
+    result = graph.clear_project(project="alpha")
+
+    assert result.scope == "project"
+    assert result.project == "alpha"
+    assert result.deleted_transcripts >= 2
+    assert result.deleted_context_windows >= 1
+    assert result.deleted_repos >= 1
+    assert graph.query(query="redis", project="alpha", max_nodes=5).nodes == []
+    assert graph.query(query="kafka", project="beta", max_nodes=5).nodes
+
+
+def test_clear_all_removes_graph_memory_data(tmp_path: Path) -> None:
+    graph = make_graph(tmp_path)
+    graph.observe_conversation(
+        user_message="Use Redis for caching.",
+        assistant_response="Noted.",
+        project="alpha",
+        session_id="sess-a",
+    )
+
+    result = graph.clear_all()
+
+    assert result.scope == "all"
+    assert result.deleted_nodes >= 1
+    assert graph.get_stats().total_nodes == 0
+    assert graph.list_context_scopes().projects == []
+
+
 def test_exact_duplicate_nodes_are_reused_and_tags_are_merged(tmp_path: Path) -> None:
     graph = make_graph(tmp_path)
     first = graph.add_node(
@@ -341,7 +419,7 @@ def test_query_ranking_uses_label_lexical_overlap(tmp_path: Path) -> None:
         node_type=NodeType.CONCEPT,
     )
 
-    result = graph.query(query="jwt", max_nodes=2, max_depth=0)
+    result = graph.query(query="jwt", max_nodes=2, max_depth=0, retrieval_mode="graph")  # Benchmark mode
 
     assert result.nodes[0].label == "JWT Auth"
 
@@ -989,6 +1067,7 @@ def test_query_graph_mode_uses_transcript_session_signal_for_node_ranking(tmp_pa
         max_nodes=2,
         max_depth=0,
         project="alpha",
+        retrieval_mode="graph",  # Test graph-only mode (benchmark mode after hybrid became default)
     )
 
     assert result.nodes
@@ -1651,8 +1730,8 @@ def test_query_supports_temporal_latest_and_oldest_bias(tmp_path: Path) -> None:
         node_type=NodeType.CONCEPT,
     )
 
-    latest = graph.query(query="latest auth architecture", max_nodes=1, max_depth=0)
-    originally = graph.query(query="originally auth architecture", max_nodes=1, max_depth=0)
+    latest = graph.query(query="latest auth architecture", max_nodes=1, max_depth=0, retrieval_mode="graph")  # Benchmark
+    originally = graph.query(query="originally auth architecture", max_nodes=1, max_depth=0, retrieval_mode="graph")  # Benchmark
 
     assert latest.nodes[0].label == "Auth v2"
     assert originally.nodes[0].label == "Auth v1"
@@ -1712,6 +1791,7 @@ def test_negation_query_prefers_rejected_node(tmp_path: Path) -> None:
         query="which model deployment shortcut remains forbidden even when evaluation looks good",
         max_nodes=1,
         max_depth=0,
+        retrieval_mode="graph",  # Benchmark mode
     )
 
     assert result.nodes[0].label == "No model auto-promotion"
@@ -1736,6 +1816,7 @@ def test_implicit_reference_security_review_emergency_access_prefers_break_glass
         query="what was the final answer to that security review item about emergency access",
         max_nodes=1,
         max_depth=0,
+        retrieval_mode="graph",  # Benchmark mode
     )
 
     assert result.nodes[0].label == "Audited break-glass access"
@@ -1766,6 +1847,7 @@ def test_implicit_reference_pm_gate_prefers_no_auto_promote(tmp_path: Path) -> N
         query="what rejected model rollout behavior came before the PM gate",
         max_nodes=1,
         max_depth=0,
+        retrieval_mode="graph",  # Benchmark mode
     )
 
     assert result.nodes[0].label == "No model auto-promotion"
@@ -1955,19 +2037,29 @@ def test_observe_conversation_round_trip_stamps_transcript_embeddings_and_turn_p
 
 
 def test_observe_conversation_rolls_back_transcript_rows_on_extraction_failure(tmp_path: Path) -> None:
+    """Test that with verbatim-first architecture, extraction failures don't prevent verbatim storage.
+    
+    CHANGED: This test now verifies the new behavior where verbatim turns are stored even
+    when candidate application fails. The old behavior (rollback on extraction failure)
+    was replaced with the new requirement: verbatim storage is MANDATORY and non-fatal.
+    """
     class ExplodingGraph(MemoryGraph):
         def _apply_observation_candidates(self, **kwargs: object) -> object:  # type: ignore[override]
             raise RuntimeError("boom")
 
     graph = ExplodingGraph(tmp_path / "memory.db", FakeEmbeddingModel())
 
-    with pytest.raises(RuntimeError, match="boom"):
-        graph.observe_conversation(
-            user_message="Use PostgreSQL for production.",
-            assistant_response="Understood.",
-            session_id="atomicity",
-            project="audit",
-        )
+    # With new architecture, this should NOT raise. Extraction failure is non-fatal.
+    result = graph.observe_conversation(
+        user_message="Use PostgreSQL for production.",
+        assistant_response="Understood.",
+        session_id="atomicity",
+        project="audit",
+    )
+    
+    # Verify verbatim was stored despite extraction failure
+    assert result.verbatim_stored is True
+    assert "boom" in result.extraction_errors[0]
 
     with graph._lock, graph._connect() as connection:
         transcript_count = int(
@@ -1983,8 +2075,11 @@ def test_observe_conversation_rolls_back_transcript_rows_on_extraction_failure(t
             ).fetchone()[0]
         )
 
-    assert transcript_count == 0
-    assert node_count == 0
+    # With new verbatim-first architecture:
+    # - Transcripts are stored (2: user + assistant)
+    # - Nodes are NOT stored (extraction failed)
+    assert transcript_count == 2, "Verbatim transcripts should be stored even when extraction fails"
+    assert node_count == 0, "No nodes should be created when candidate application fails"
 
 
 def test_abhi_round_trip_200_turn_graph_preserves_query_results(tmp_path: Path) -> None:
@@ -2028,3 +2123,124 @@ def test_abhi_round_trip_200_turn_graph_preserves_query_results(tmp_path: Path) 
         (row["id"], row["transcript_text"]) for row in second_doc["transcripts"]
     ]
     assert first_doc["manifest"]["counts"] == second_doc["manifest"]["counts"]
+
+
+# ---------------------------------------------------------------------------
+# Magic-byte format detection tests
+# ---------------------------------------------------------------------------
+
+def _minimal_snapshot() -> dict:
+    """Return the smallest valid snapshot that write_abhi_document will accept."""
+    return {
+        "tenant_id": "test",
+        "nodes": [],
+        "edges": [],
+        "transcripts": [],
+        "context_windows": [],
+        "repos": [],
+        "context_window_edges": [],
+        "ui": {},
+    }
+
+
+def test_abhi_v1_file_starts_with_magic_bytes(tmp_path: Path) -> None:
+    """Files written by write_abhi_document must start with the WGL\\x01 magic."""
+    out = tmp_path / "test.abhi"
+    write_abhi_document(_minimal_snapshot(), output_path=out)
+    assert out.read_bytes()[:4] == ABHI_MAGIC, (
+        "Expected WGL\\x01 magic bytes at the start of the exported file"
+    )
+
+
+def test_abhi_v1_file_round_trips_through_load(tmp_path: Path) -> None:
+    """A v1 file written by write_abhi_document must load cleanly."""
+    out = tmp_path / "test.abhi"
+    write_abhi_document(_minimal_snapshot(), output_path=out)
+    doc = load_abhi_document(out)
+    assert "manifest" in doc
+
+
+def test_abhi_legacy_v0_bare_zip_still_loads(tmp_path: Path, caplog) -> None:
+    """A bare ZIP file (v0, no magic bytes) must still load for backwards compat
+    and emit a deprecation warning via the logger."""
+    import zipfile as _zf
+    from waggle.abhi import (
+        ABHI_MANIFEST_MEMBER,
+        ABHI_NODES_MEMBER,
+        ABHI_EDGES_MEMBER,
+        ABHI_TRANSCRIPTS_MEMBER,
+        ABHI_CONTEXT_WINDOWS_MEMBER,
+        ABHI_SPEC_VERSION,
+        _canonical_json,
+        _deterministic_zip_info,
+    )
+
+    out = tmp_path / "legacy.abhi"
+    manifest = {
+        "schema_version": ABHI_SPEC_VERSION,
+        "tenant": "test",
+        "agent_id": "",
+        "project": "",
+        "session_id": "",
+        "embedding_model_id": "",
+        "embedding_dim": 0,
+        "encryption": {"enabled": False, "algorithm": ""},
+        "signatures": {"algorithm": "ed25519", "present": False},
+        "scope": "all",
+        "includes_embeddings": False,
+        "export_context": {},
+        "counts": {"transcripts": 0, "nodes": 0, "edges": 0, "context_windows": 0},
+        "members": {},
+        "ui": {},
+        "repos": [],
+        "context_window_edges": [],
+        "content_hash": "sha256:0",
+    }
+    with _zf.ZipFile(out, "w", compression=_zf.ZIP_DEFLATED) as arc:
+        for member in (
+            ABHI_TRANSCRIPTS_MEMBER,
+            ABHI_NODES_MEMBER,
+            ABHI_EDGES_MEMBER,
+            ABHI_CONTEXT_WINDOWS_MEMBER,
+        ):
+            arc.writestr(_deterministic_zip_info(member), b"")
+        arc.writestr(_deterministic_zip_info(ABHI_MANIFEST_MEMBER), _canonical_json(manifest))
+
+    import logging
+    with caplog.at_level(logging.WARNING, logger="waggle.abhi"):
+        doc = load_abhi_document(out)
+
+    assert "manifest" in doc
+    assert any("legacy" in record.message.lower() for record in caplog.records), (
+        "Expected a deprecation warning for v0 legacy files"
+    )
+
+
+def test_abhi_corrupted_magic_raises_validation_failure(tmp_path: Path) -> None:
+    """A file with unrecognised header bytes must raise ValidationFailure, not BadZipFile."""
+    from waggle.errors import ValidationFailure as VF
+
+    bad = tmp_path / "bad.abhi"
+    bad.write_bytes(b"\xDE\xAD\xBE\xEF" + b"not a zip at all")
+    with pytest.raises(VF, match="not a valid .abhi file"):
+        load_abhi_document(bad)
+
+
+def test_abhi_truncated_file_raises_validation_failure(tmp_path: Path) -> None:
+    """A file shorter than 4 bytes must raise ValidationFailure, not crash."""
+    from waggle.errors import ValidationFailure as VF
+
+    tiny = tmp_path / "tiny.abhi"
+    tiny.write_bytes(b"\x57\x47")  # only 2 bytes — too short
+    with pytest.raises(VF, match="too short or empty"):
+        load_abhi_document(tiny)
+
+
+def test_abhi_json_file_raises_validation_failure(tmp_path: Path) -> None:
+    """A plain JSON file (e.g. old v1-spec .abhi) must raise ValidationFailure."""
+    from waggle.errors import ValidationFailure as VF
+
+    json_file = tmp_path / "old.abhi"
+    json_file.write_text('{"graph": {}}', encoding="utf-8")
+    with pytest.raises(VF, match="not a valid .abhi file"):
+        load_abhi_document(json_file)

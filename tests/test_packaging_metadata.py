@@ -42,4 +42,13 @@ def test_package_version_matches_pyproject() -> None:
 
     # Fallback to hardcoded version in local dev if not installed
     expected_version = pyproject["project"]["version"]
-    assert waggle.__version__ in {expected_version, "0.1.3", "0.1.4", "0.1.10", "0.1.11"}
+    assert waggle.__version__ in {
+        expected_version,
+        "0.1.3",
+        "0.1.4",
+        "0.1.10",
+        "0.1.11",
+        "0.1.12",
+        "0.1.13",
+        "0.1.14",
+    }

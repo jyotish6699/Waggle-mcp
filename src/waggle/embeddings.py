@@ -21,6 +21,7 @@ EMBEDDING_FREE_TOOLS: frozenset[str] = frozenset(
         "list_conflicts",
         "get_node_history",
         "timeline",
+        "edge_quality_report",
     }
 )
 
@@ -119,7 +120,13 @@ class EmbeddingModel:
     def model_version(self) -> str:
         if self.uses_deterministic_mode:
             return "deterministic-v1"
-        model = self.model
+        # Eagerly resolve the model so the version string is stable and matches
+        # what will actually be used for embeddings (avoids cache key mismatch).
+        with self._lock:
+            model = self._model
+        if model is None and not self._warmup_started:
+            # Trigger synchronous on-demand load to resolve the real version.
+            model = self._resolve_model(wait_timeout=60.0)
         if model is None:
             return "deterministic-v1"
         version = getattr(model, "__version__", None)

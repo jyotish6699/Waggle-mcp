@@ -4,7 +4,7 @@ import base64
 import json
 import threading
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -27,7 +27,7 @@ from waggle.abhi import (
     validate_abhi_document,
     write_abhi_document,
 )
-from waggle.auth import generate_api_key, hash_api_key, verify_api_key
+from waggle.auth import api_key_prefix, generate_api_key, hash_api_key, verify_api_key
 from waggle.context_bundle import build_context_bundle, build_query_summary, export_context_bundle_files
 from waggle.evidence import build_observation_evidence, merge_evidence_records, merge_validity_windows
 from waggle.errors import AuthenticationError, ValidationFailure
@@ -77,6 +77,7 @@ from waggle.models import (
     AbhiValidationResult,
     ApiKeyCreateResult,
     ApiKeyRecord,
+    AuditEventRecord,
     BackupResult,
     ConflictEntry,
     ConflictListResult,
@@ -104,6 +105,8 @@ from waggle.models import (
     ReplayHit,
     RecentNodeStat,
     RelationType,
+    RetentionPolicyRecord,
+    RetentionPruneRunRecord,
     SubgraphResult,
     TranscriptRecord,
     normalize_relationship,
@@ -291,6 +294,24 @@ class Neo4jMemoryGraph:
             ).consume()
             session.run(
                 """
+                CREATE CONSTRAINT waggle_retention_policy_tenant IF NOT EXISTS
+                FOR (p:GraphRetentionPolicy) REQUIRE p.tenant_id IS UNIQUE
+                """
+            ).consume()
+            session.run(
+                """
+                CREATE CONSTRAINT waggle_retention_run_id IF NOT EXISTS
+                FOR (r:GraphRetentionPruneRun) REQUIRE r.run_id IS UNIQUE
+                """
+            ).consume()
+            session.run(
+                """
+                CREATE CONSTRAINT waggle_audit_event_id IF NOT EXISTS
+                FOR (a:GraphAuditEvent) REQUIRE a.event_id IS UNIQUE
+                """
+            ).consume()
+            session.run(
+                """
                 CREATE INDEX waggle_node_tenant_updated IF NOT EXISTS
                 FOR (n:MemoryNode) ON (n.tenant_id, n.updated_at)
                 """
@@ -376,14 +397,236 @@ class Neo4jMemoryGraph:
             created_at=_parse_datetime(record["created_at"]),
         )
 
-    def create_api_key(self, tenant_id: str, name: str = "") -> ApiKeyCreateResult:
+    def _delete_label_batch(
+        self,
+        session: Any,
+        *,
+        match_query: str,
+        delete_query: str,
+        cutoff: datetime,
+        batch_size: int,
+    ) -> int:
+        deleted = 0
+        limit = max(1, int(batch_size))
+        while True:
+            rows = session.run(
+                match_query,
+                tenant_id=self.tenant_id,
+                cutoff=cutoff.isoformat(),
+                limit=limit,
+            )
+            ids = [record["id"] for record in rows]
+            if not ids:
+                return deleted
+            session.run(delete_query, ids=ids).consume()
+            deleted += len(ids)
+
+    def _delete_old_export_files(self, *, cutoff: datetime) -> int:
+        if not self.export_dir.exists():
+            return 0
+        deleted = 0
+        cutoff_ts = cutoff.timestamp()
+        for path in self.export_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                if path.stat().st_mtime < cutoff_ts:
+                    path.unlink(missing_ok=True)
+                    deleted += 1
+            except FileNotFoundError:
+                continue
+        return deleted
+
+    def _store_retention_run(self, run: RetentionPruneRunRecord, *, session: Any | None = None) -> None:
+        owns_session = session is None
+        active_session = session or self._session()
+        try:
+            active_session.run(
+                """
+                MERGE (r:GraphRetentionPruneRun {run_id: $run_id})
+                SET r.tenant_id = $tenant_id,
+                    r.status = $status,
+                    r.cutoff = $cutoff,
+                    r.started_at = $started_at,
+                    r.completed_at = $completed_at,
+                    r.deleted_nodes = $deleted_nodes,
+                    r.deleted_edges = $deleted_edges,
+                    r.deleted_transcripts = $deleted_transcripts,
+                    r.deleted_context_windows = $deleted_context_windows,
+                    r.deleted_context_window_edges = $deleted_context_window_edges,
+                    r.deleted_exports = $deleted_exports,
+                    r.duration_ms = $duration_ms,
+                    r.error_message = $error_message
+                """,
+                run_id=run.run_id,
+                tenant_id=run.tenant_id,
+                status=run.status,
+                cutoff=run.cutoff.isoformat(),
+                started_at=run.started_at.isoformat(),
+                completed_at=run.completed_at.isoformat() if run.completed_at else None,
+                deleted_nodes=run.deleted_nodes,
+                deleted_edges=run.deleted_edges,
+                deleted_transcripts=run.deleted_transcripts,
+                deleted_context_windows=run.deleted_context_windows,
+                deleted_context_window_edges=run.deleted_context_window_edges,
+                deleted_exports=run.deleted_exports,
+                duration_ms=run.duration_ms,
+                error_message=run.error_message,
+            ).consume()
+        finally:
+            if owns_session:
+                active_session.close()
+
+    def emit_audit_event(
+        self,
+        *,
+        event_type: str,
+        actor_type: str = "system",
+        actor_id: str = "",
+        api_key_id: str = "",
+        resource_type: str = "",
+        resource_id: str = "",
+        action: str = "",
+        status: str = "success",
+        ip_address: str = "",
+        user_agent: str = "",
+        metadata: dict[str, Any] | None = None,
+        created_at: datetime | None = None,
+        session: Any | None = None,
+    ) -> AuditEventRecord:
+        event = AuditEventRecord(
+            tenant_id=self.tenant_id,
+            event_type=event_type,
+            actor_type=actor_type,
+            actor_id=actor_id,
+            api_key_id=api_key_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            action=action or event_type,
+            status=status,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            created_at=created_at or utc_now(),
+            metadata=metadata or {},
+        )
+        owns_session = session is None
+        active_session = session or self._session()
+        try:
+            active_session.run(
+                """
+                CREATE (a:GraphAuditEvent {
+                    event_id: $event_id,
+                    tenant_id: $tenant_id,
+                    event_type: $event_type,
+                    actor_type: $actor_type,
+                    actor_id: $actor_id,
+                    api_key_id: $api_key_id,
+                    resource_type: $resource_type,
+                    resource_id: $resource_id,
+                    action: $action,
+                    status: $status,
+                    ip_address: $ip_address,
+                    user_agent: $user_agent,
+                    created_at: $created_at,
+                    metadata: $metadata
+                })
+                """,
+                event_id=event.event_id,
+                tenant_id=event.tenant_id,
+                event_type=event.event_type,
+                actor_type=event.actor_type,
+                actor_id=event.actor_id,
+                api_key_id=event.api_key_id,
+                resource_type=event.resource_type,
+                resource_id=event.resource_id,
+                action=event.action,
+                status=event.status,
+                ip_address=event.ip_address,
+                user_agent=event.user_agent,
+                created_at=event.created_at.isoformat(),
+                metadata=event.metadata,
+            ).consume()
+        finally:
+            if owns_session:
+                active_session.close()
+        return event
+
+    def list_audit_events(
+        self,
+        *,
+        limit: int = 100,
+        event_type: str = "",
+        actor_id: str = "",
+        resource_id: str = "",
+        resource_type: str = "",
+        status: str = "",
+    ) -> list[AuditEventRecord]:
+        predicates = ["a.tenant_id = $tenant_id"]
+        params: dict[str, Any] = {"tenant_id": self.tenant_id, "limit": max(1, int(limit))}
+        if event_type.strip():
+            predicates.append("a.event_type = $event_type")
+            params["event_type"] = event_type.strip()
+        if actor_id.strip():
+            predicates.append("a.actor_id = $actor_id")
+            params["actor_id"] = actor_id.strip()
+        if resource_id.strip():
+            predicates.append("a.resource_id = $resource_id")
+            params["resource_id"] = resource_id.strip()
+        if resource_type.strip():
+            predicates.append("a.resource_type = $resource_type")
+            params["resource_type"] = resource_type.strip()
+        if status.strip():
+            predicates.append("a.status = $status")
+            params["status"] = status.strip()
+        query = f"""
+            MATCH (a:GraphAuditEvent)
+            WHERE {" AND ".join(predicates)}
+            RETURN a
+            ORDER BY a.created_at DESC
+            LIMIT $limit
+        """
+        with self._lock, self._session() as session:
+            rows = [record["a"] for record in session.run(query, **params)]
+        return [
+            AuditEventRecord(
+                event_id=props["event_id"],
+                tenant_id=props["tenant_id"],
+                event_type=props["event_type"],
+                actor_type=props.get("actor_type") or "system",
+                actor_id=props.get("actor_id") or "",
+                api_key_id=props.get("api_key_id") or "",
+                resource_type=props.get("resource_type") or "",
+                resource_id=props.get("resource_id") or "",
+                action=props.get("action") or "",
+                status=props.get("status") or "success",
+                ip_address=props.get("ip_address") or "",
+                user_agent=props.get("user_agent") or "",
+                created_at=_parse_datetime(props["created_at"]),
+                metadata=props.get("metadata") or {},
+            )
+            for props in rows
+        ]
+
+    def create_api_key(
+        self,
+        tenant_id: str,
+        name: str = "",
+        *,
+        expires_at: datetime | None = None,
+        created_by: str = "",
+        scopes: list[str] | None = None,
+    ) -> ApiKeyCreateResult:
         tenant = self.ensure_tenant(tenant_id)
         raw_api_key = generate_api_key()
         record = ApiKeyRecord(
             api_key_id=str(uuid4()),
             tenant_id=tenant.tenant_id,
             key_hash=hash_api_key(raw_api_key),
+            prefix=api_key_prefix(raw_api_key),
             name=name.strip(),
+            expires_at=expires_at,
+            created_by=created_by.strip(),
+            scopes=scopes,
         )
         with self._lock, self._session() as session:
             session.run(
@@ -393,20 +636,30 @@ class Neo4jMemoryGraph:
                     api_key_id: $api_key_id,
                     tenant_id: $tenant_id,
                     key_hash: $key_hash,
+                    prefix: $prefix,
                     name: $name,
                     status: $status,
                     created_at: $created_at,
-                    last_used_at: $last_used_at
+                    expires_at: $expires_at,
+                    revoked_at: $revoked_at,
+                    last_used_at: $last_used_at,
+                    created_by: $created_by,
+                    scopes: $scopes
                 })
                 CREATE (t)-[:OWNS_API_KEY]->(a)
                 """,
                 api_key_id=record.api_key_id,
                 tenant_id=record.tenant_id,
                 key_hash=record.key_hash,
+                prefix=record.prefix,
                 name=record.name,
                 status=record.status,
                 created_at=record.created_at.isoformat(),
+                expires_at=record.expires_at.isoformat() if record.expires_at else None,
+                revoked_at=None,
                 last_used_at=None,
+                created_by=record.created_by,
+                scopes=record.scopes,
             ).consume()
         return ApiKeyCreateResult(record=record, raw_api_key=raw_api_key)
 
@@ -416,7 +669,9 @@ class Neo4jMemoryGraph:
                 """
                 MATCH (a:GraphApiKey {tenant_id: $tenant_id})
                 RETURN a.api_key_id AS api_key_id, a.tenant_id AS tenant_id, a.key_hash AS key_hash,
-                       a.name AS name, a.status AS status, a.created_at AS created_at, a.last_used_at AS last_used_at
+                       a.prefix AS prefix, a.name AS name, a.status AS status, a.created_at AS created_at,
+                       a.expires_at AS expires_at, a.revoked_at AS revoked_at, a.last_used_at AS last_used_at,
+                       a.created_by AS created_by, a.scopes AS scopes
                 ORDER BY a.created_at DESC
                 """,
                 tenant_id=tenant_id,
@@ -426,10 +681,15 @@ class Neo4jMemoryGraph:
                     api_key_id=row["api_key_id"],
                     tenant_id=row["tenant_id"],
                     key_hash=row["key_hash"],
+                    prefix=row["prefix"] or "",
                     name=row["name"] or "",
                     status=row["status"],
                     created_at=_parse_datetime(row["created_at"]),
+                    expires_at=_parse_datetime(row["expires_at"]) if row["expires_at"] else None,
+                    revoked_at=_parse_datetime(row["revoked_at"]) if row["revoked_at"] else None,
                     last_used_at=_parse_datetime(row["last_used_at"]) if row["last_used_at"] else None,
+                    created_by=row["created_by"] or "",
+                    scopes=row["scopes"] or [],
                 )
                 for row in rows
             ]
@@ -439,10 +699,261 @@ class Neo4jMemoryGraph:
             session.run(
                 """
                 MATCH (a:GraphApiKey {api_key_id: $api_key_id})
-                SET a.status = 'revoked'
+                SET a.status = 'revoked', a.revoked_at = $revoked_at
                 """,
                 api_key_id=api_key_id,
+                revoked_at=utc_now().isoformat(),
             ).consume()
+
+    def get_retention_policy(
+        self,
+        *,
+        default_enabled: bool = False,
+        default_retention_days: int = 90,
+        default_prune_interval_hours: int = 24,
+    ) -> RetentionPolicyRecord:
+        now = utc_now()
+        with self._lock, self._session() as session:
+            record = session.run(
+                """
+                MERGE (p:GraphRetentionPolicy {tenant_id: $tenant_id})
+                ON CREATE SET
+                    p.enabled = $enabled,
+                    p.retention_days = $retention_days,
+                    p.prune_interval_hours = $prune_interval_hours,
+                    p.created_at = $created_at,
+                    p.updated_at = $updated_at
+                RETURN p
+                """,
+                tenant_id=self.tenant_id,
+                enabled=bool(default_enabled),
+                retention_days=int(default_retention_days),
+                prune_interval_hours=int(default_prune_interval_hours),
+                created_at=now.isoformat(),
+                updated_at=now.isoformat(),
+            ).single()
+        props = record["p"]
+        return RetentionPolicyRecord(
+            tenant_id=props["tenant_id"],
+            enabled=bool(props["enabled"]),
+            retention_days=int(props["retention_days"]),
+            prune_interval_hours=int(props["prune_interval_hours"]),
+            last_pruned_at=_parse_datetime(props["last_pruned_at"]) if props.get("last_pruned_at") else None,
+            created_at=_parse_datetime(props["created_at"]),
+            updated_at=_parse_datetime(props["updated_at"]),
+        )
+
+    def update_retention_policy(
+        self,
+        *,
+        enabled: bool | None = None,
+        retention_days: int | None = None,
+        prune_interval_hours: int | None = None,
+        default_enabled: bool = False,
+        default_retention_days: int = 90,
+        default_prune_interval_hours: int = 24,
+    ) -> RetentionPolicyRecord:
+        current = self.get_retention_policy(
+            default_enabled=default_enabled,
+            default_retention_days=default_retention_days,
+            default_prune_interval_hours=default_prune_interval_hours,
+        )
+        next_enabled = current.enabled if enabled is None else bool(enabled)
+        next_retention_days = current.retention_days if retention_days is None else int(retention_days)
+        next_prune_interval_hours = current.prune_interval_hours if prune_interval_hours is None else int(prune_interval_hours)
+        if next_retention_days < 1:
+            raise ValidationFailure("Retention days must be at least 1.")
+        if next_prune_interval_hours < 1:
+            raise ValidationFailure("Prune interval hours must be at least 1.")
+        updated_at = utc_now()
+        with self._lock, self._session() as session:
+            session.run(
+                """
+                MATCH (p:GraphRetentionPolicy {tenant_id: $tenant_id})
+                SET p.enabled = $enabled,
+                    p.retention_days = $retention_days,
+                    p.prune_interval_hours = $prune_interval_hours,
+                    p.updated_at = $updated_at
+                """,
+                tenant_id=self.tenant_id,
+                enabled=next_enabled,
+                retention_days=next_retention_days,
+                prune_interval_hours=next_prune_interval_hours,
+                updated_at=updated_at.isoformat(),
+            ).consume()
+        return self.get_retention_policy(
+            default_enabled=default_enabled,
+            default_retention_days=default_retention_days,
+            default_prune_interval_hours=default_prune_interval_hours,
+        )
+
+    def list_retention_runs(self, *, limit: int = 20) -> list[RetentionPruneRunRecord]:
+        with self._lock, self._session() as session:
+            rows = session.run(
+                """
+                MATCH (r:GraphRetentionPruneRun {tenant_id: $tenant_id})
+                RETURN r
+                ORDER BY r.started_at DESC
+                LIMIT $limit
+                """,
+                tenant_id=self.tenant_id,
+                limit=max(1, int(limit)),
+            )
+            records = [record["r"] for record in rows]
+        return [
+            RetentionPruneRunRecord(
+                run_id=props["run_id"],
+                tenant_id=props["tenant_id"],
+                status=props["status"],
+                cutoff=_parse_datetime(props["cutoff"]),
+                started_at=_parse_datetime(props["started_at"]),
+                completed_at=_parse_datetime(props["completed_at"]) if props.get("completed_at") else None,
+                deleted_nodes=int(props.get("deleted_nodes") or 0),
+                deleted_edges=int(props.get("deleted_edges") or 0),
+                deleted_transcripts=int(props.get("deleted_transcripts") or 0),
+                deleted_context_windows=int(props.get("deleted_context_windows") or 0),
+                deleted_context_window_edges=int(props.get("deleted_context_window_edges") or 0),
+                deleted_exports=int(props.get("deleted_exports") or 0),
+                duration_ms=int(props.get("duration_ms") or 0),
+                error_message=props.get("error_message") or "",
+            )
+            for props in records
+        ]
+
+    def prune_retention(
+        self,
+        *,
+        now: datetime | None = None,
+        batch_size: int = 1000,
+        default_enabled: bool = False,
+        default_retention_days: int = 90,
+        default_prune_interval_hours: int = 24,
+    ) -> RetentionPruneRunRecord:
+        policy = self.get_retention_policy(
+            default_enabled=default_enabled,
+            default_retention_days=default_retention_days,
+            default_prune_interval_hours=default_prune_interval_hours,
+        )
+        current_time = now or utc_now()
+        cutoff = current_time - timedelta(days=policy.retention_days)
+        started_at = utc_now()
+        run = RetentionPruneRunRecord(
+            tenant_id=self.tenant_id,
+            status="completed",
+            cutoff=cutoff,
+            started_at=started_at,
+        )
+        if not policy.enabled:
+            run.status = "skipped"
+            run.completed_at = started_at
+            self._store_retention_run(run)
+            return run
+
+        try:
+            with self._lock, self._session() as session:
+                run.deleted_context_window_edges = self._delete_label_batch(
+                    session,
+                    match_query="""
+                        MATCH ()-[r:CONTEXT_WINDOW_EDGE]->()
+                        WHERE r.tenant_id = $tenant_id AND r.created_at < $cutoff
+                        RETURN r.id AS id
+                        LIMIT $limit
+                    """,
+                    delete_query="""
+                        MATCH ()-[r:CONTEXT_WINDOW_EDGE]->()
+                        WHERE r.id IN $ids
+                        DELETE r
+                    """,
+                    cutoff=cutoff,
+                    batch_size=batch_size,
+                )
+                run.deleted_edges = self._delete_label_batch(
+                    session,
+                    match_query="""
+                        MATCH ()-[r:MEMORY_EDGE]->()
+                        WHERE r.tenant_id = $tenant_id AND r.created_at < $cutoff
+                        RETURN r.id AS id
+                        LIMIT $limit
+                    """,
+                    delete_query="""
+                        MATCH ()-[r:MEMORY_EDGE]->()
+                        WHERE r.id IN $ids
+                        DELETE r
+                    """,
+                    cutoff=cutoff,
+                    batch_size=batch_size,
+                )
+                run.deleted_nodes = self._delete_label_batch(
+                    session,
+                    match_query="""
+                        MATCH (n:MemoryNode {tenant_id: $tenant_id})
+                        WHERE n.created_at < $cutoff
+                        RETURN n.id AS id
+                        LIMIT $limit
+                    """,
+                    delete_query="""
+                        MATCH (n:MemoryNode)
+                        WHERE n.id IN $ids
+                        DETACH DELETE n
+                    """,
+                    cutoff=cutoff,
+                    batch_size=batch_size,
+                )
+                run.deleted_transcripts = self._delete_label_batch(
+                    session,
+                    match_query="""
+                        MATCH (t:MemoryTranscript {tenant_id: $tenant_id})
+                        WHERE t.observed_at < $cutoff
+                        RETURN t.id AS id
+                        LIMIT $limit
+                    """,
+                    delete_query="""
+                        MATCH (t:MemoryTranscript)
+                        WHERE t.id IN $ids
+                        DELETE t
+                    """,
+                    cutoff=cutoff,
+                    batch_size=batch_size,
+                )
+                run.deleted_context_windows = self._delete_label_batch(
+                    session,
+                    match_query="""
+                        MATCH (w:ContextWindow {tenant_id: $tenant_id})
+                        WHERE w.created_at < $cutoff
+                        RETURN w.id AS id
+                        LIMIT $limit
+                    """,
+                    delete_query="""
+                        MATCH (w:ContextWindow)
+                        WHERE w.id IN $ids
+                        DETACH DELETE w
+                    """,
+                    cutoff=cutoff,
+                    batch_size=batch_size,
+                )
+                run.deleted_exports = self._delete_old_export_files(cutoff=cutoff)
+                completed_at = utc_now()
+                run.completed_at = completed_at
+                run.duration_ms = max(0, int((completed_at - started_at).total_seconds() * 1000))
+                session.run(
+                    """
+                    MATCH (p:GraphRetentionPolicy {tenant_id: $tenant_id})
+                    SET p.last_pruned_at = $last_pruned_at, p.updated_at = $updated_at
+                    """,
+                    tenant_id=self.tenant_id,
+                    last_pruned_at=completed_at.isoformat(),
+                    updated_at=completed_at.isoformat(),
+                ).consume()
+                self._store_retention_run(run, session=session)
+        except Exception as exc:
+            completed_at = utc_now()
+            run.status = "failed"
+            run.error_message = str(exc)
+            run.completed_at = completed_at
+            run.duration_ms = max(0, int((completed_at - started_at).total_seconds() * 1000))
+            self._store_retention_run(run)
+            raise
+        return run
 
     def authenticate_api_key(self, raw_api_key: str) -> ApiKeyRecord:
         key_hash = hash_api_key(raw_api_key)
@@ -451,13 +962,20 @@ class Neo4jMemoryGraph:
                 """
                 MATCH (a:GraphApiKey {key_hash: $key_hash})
                 RETURN a.api_key_id AS api_key_id, a.tenant_id AS tenant_id, a.key_hash AS key_hash,
-                       a.name AS name, a.status AS status, a.created_at AS created_at, a.last_used_at AS last_used_at
+                       a.prefix AS prefix, a.name AS name, a.status AS status, a.created_at AS created_at,
+                       a.expires_at AS expires_at, a.revoked_at AS revoked_at, a.last_used_at AS last_used_at,
+                       a.created_by AS created_by, a.scopes AS scopes
                 LIMIT 1
                 """,
                 key_hash=key_hash,
             ).single()
             if row is None or not verify_api_key(raw_api_key, row["key_hash"]):
                 raise AuthenticationError("Invalid API key.")
+            if row["status"] != "active":
+                raise AuthenticationError("Invalid API key.")
+            expires_at = _parse_datetime(row["expires_at"]) if row["expires_at"] else None
+            if expires_at is not None and expires_at <= utc_now():
+                raise AuthenticationError("API key expired.")
             session.run(
                 """
                 MATCH (a:GraphApiKey {api_key_id: $api_key_id})
@@ -470,10 +988,15 @@ class Neo4jMemoryGraph:
             api_key_id=row["api_key_id"],
             tenant_id=row["tenant_id"],
             key_hash=row["key_hash"],
+            prefix=row["prefix"] or "",
             name=row["name"] or "",
             status=row["status"],
             created_at=_parse_datetime(row["created_at"]),
+            expires_at=expires_at,
+            revoked_at=_parse_datetime(row["revoked_at"]) if row["revoked_at"] else None,
             last_used_at=utc_now(),
+            created_by=row["created_by"] or "",
+            scopes=row["scopes"] or [],
         )
 
     def add_node(
@@ -983,7 +1506,7 @@ class Neo4jMemoryGraph:
         agent_id: str = "",
         project: str = "",
         session_id: str = "",
-        retrieval_mode: str = "graph",
+        retrieval_mode: str = "hybrid",
     ) -> SubgraphResult:
         query_text = query.strip()
         if not query_text:
@@ -993,8 +1516,11 @@ class Neo4jMemoryGraph:
         if max_depth < 0:
             raise ValueError("max_depth cannot be negative.")
         normalized_mode = {"replay": "verbatim", "fusion": "hybrid"}.get(retrieval_mode.strip().lower(), retrieval_mode.strip().lower())
+        # Accept "hybrid_no_rerank" as alias for "hybrid" (reranking is configurable via HybridRetrievalConfig)
+        if normalized_mode == "hybrid_no_rerank":
+            normalized_mode = "hybrid"
         if normalized_mode not in {"graph", "verbatim", "hybrid"}:
-            raise ValidationFailure("retrieval_mode must be one of: graph, verbatim, hybrid.")
+            raise ValidationFailure("retrieval_mode must be one of: graph, verbatim, hybrid, hybrid_no_rerank (benchmark modes: graph_only, verbatim_only).")
 
         graph_result = (
             self._query_graph_only(

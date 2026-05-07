@@ -37,5 +37,11 @@ For generic MCP clients today, portable automatic memory requires both:
 
 - Use the same `WAGGLE_DB_PATH` across clients if you want Codex and Antigravity to share one local memory graph.
 - Keep scope stable across sessions, especially `project`, or recall will look empty even when memory exists.
+- Live memory should be selective and low-overhead: durable turns are ingested automatically, while low-value chatter is skipped.
 - `ingest-transcript-handoff` is for rollover/session-handoff ingestion and export.
+- For explicit session/app switching, use a scoped `.abhi` checkpoint with `waggle-mcp checkpoint-context` or `waggle-mcp commit`.
+- Resume precedence is DB-first, `.abhi` second:
+  - same machine / same `WAGGLE_DB_PATH`: recall from SQLite
+  - cross-session or cross-app on the same machine: use stable scopes and the shared DB
+  - different machine or explicit handoff: `pull` / `import` the `.abhi`
 - Normal live conversational memory still depends on automatic `prime_context`, `query_graph`, and `observe_conversation` usage during chats.

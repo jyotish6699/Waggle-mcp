@@ -2,6 +2,14 @@
 
 This page keeps the lower-level operational and configuration material out of the top-level README.
 
+## Production evaluation docs
+
+For self-hosted production planning:
+
+- [Production deployment guide](deployment/production.md)
+- [Security model](security/security-model.md)
+- [Hardening checklist](security/hardening-checklist.md)
+
 ## Installation variants
 
 ### Local / development
@@ -350,7 +358,9 @@ No extra extraction runtime is required. `observe_conversation` uses the built-i
 waggle-mcp create-tenant --tenant-id workspace-a --name "Workspace A"
 
 # Issue an API key (raw key returned once)
-waggle-mcp create-api-key --tenant-id workspace-a --name "ci-agent"
+waggle-mcp create-api-key --tenant-id workspace-a --name "ci-agent" \
+  --expires-in-days 30 --created-by "ops@example.com" \
+  --scopes "graph:read,graph:write,admin:read"
 
 # List keys for a tenant
 waggle-mcp list-api-keys --tenant-id workspace-a
@@ -358,11 +368,57 @@ waggle-mcp list-api-keys --tenant-id workspace-a
 # Revoke a key
 waggle-mcp revoke-api-key --api-key-id <id>
 
+# Show retention status
+waggle-mcp retention-status --tenant-id workspace-a
+
+# Enable 90-day retention with a 24-hour prune interval
+waggle-mcp set-retention --tenant-id workspace-a --enabled --days 90 --interval-hours 24
+
+# Run pruning immediately
+waggle-mcp prune-retention --tenant-id workspace-a
+
+# List recent prune runs
+waggle-mcp list-retention-runs --tenant-id workspace-a --limit 10
+
+# Query audit events
+waggle-mcp list-audit-events --tenant-id workspace-a --type api_key.created --limit 50
+
 # Migrate SQLite data → Neo4j
 WAGGLE_BACKEND=neo4j WAGGLE_NEO4J_URI=bolt://localhost:7687 \
 WAGGLE_NEO4J_USERNAME=neo4j WAGGLE_NEO4J_PASSWORD=change-me \
   waggle-mcp migrate-sqlite --db-path ./memory.db --tenant-id workspace-a
 ```
+
+`create-api-key` returns the raw key once along with non-secret metadata such as the key `prefix`, `expires_at`, `created_by`, and `scopes`. `list-api-keys` deliberately omits `key_hash` and returns only redacted administrative fields so keys can be rotated and audited without exposing the stored verifier.
+`retention-status` and `set-retention` manage the per-tenant retention policy. `prune-retention` deletes aged graph records, transcript records, and old files in the configured export directory, then stores a prune summary you can inspect with `list-retention-runs`.
+`list-audit-events` queries the append-only audit stream for a tenant, with filters for event type, actor, resource, and status.
+
+HTTP admin endpoints are also available in the self-hosted app surface:
+
+- `GET /api/admin/retention`
+- `PUT /api/admin/retention`
+- `POST /api/admin/retention/prune`
+- `GET /api/admin/retention/runs`
+- `GET /api/admin/audit-events`
+If `X-API-Key` is provided, the request is scoped to that key's tenant. Otherwise the endpoints use `tenant_id` from the query string or body and fall back to the configured default tenant.
+
+The HTTP graph surface also emits read-side audit events for snapshot fetches, transcript reads, query/debug views, diff reads, and export downloads.
+
+Supported API key scopes:
+
+- `graph:read`
+- `graph:write`
+- `admin:read`
+- `admin:write`
+
+When an API key is presented:
+
+- MCP read calls require `graph:read`
+- MCP write calls require `graph:write`
+- `/api/graph/*` read routes require `graph:read`
+- `/api/graph/*` write routes require `graph:write`
+- `/api/admin/*` read routes require `admin:read`
+- `/api/admin/*` write routes require `admin:write`
 
 ## Full tool surface
 
@@ -421,13 +477,12 @@ Repository layout:
 ```text
 waggle-mcp/
 ├── assets/
-├── benchmarks/fixtures/
-├── benchmarks/longmemeval/
 ├── deploy/
-├── docs/runbooks/
+├── docs/
 ├── scripts/
+├── graph-ui/
 ├── src/waggle/
-├── tests/artifacts/
+├── tests/
 ├── Dockerfile
 ├── pyproject.toml
 └── README.md
@@ -498,6 +553,11 @@ waggle-mcp ingest-transcript-handoff \
   --max-nodes 30 \
   --output-path ./handoff-bundle
 ```
+
+This command now does three things for rollover:
+- ingests the transcript into the live SQLite DB
+- exports the requested Markdown/JSON handoff bundle
+- emits a session-scoped `.abhi` checkpoint and refreshes the local checkpoint manifest
 
 ### Flags
 
@@ -613,7 +673,23 @@ This is a known v1 simplification. Tool messages do not split or interrupt extra
 
 ### Retention policy
 
-Transcript provenance is stored indefinitely in this version. There is no automatic cleanup or expiry. Future versions may add a retention tooling command. Callers that need to prune data should use direct database tooling or wait for a future `prune-transcripts` command.
+Core now supports per-tenant retention policies through the admin CLI:
+
+- `waggle-mcp retention-status --tenant-id <tenant>`
+- `waggle-mcp set-retention --tenant-id <tenant> --enabled --days 90 --interval-hours 24`
+- `waggle-mcp prune-retention --tenant-id <tenant>`
+- `waggle-mcp list-retention-runs --tenant-id <tenant>`
+
+Retention pruning currently covers:
+
+- graph nodes
+- graph edges
+- context windows
+- context-window edges
+- transcript provenance records
+- old files in the configured export directory
+
+Core does not yet run pruning automatically in the background. Operators should trigger it from their scheduler of choice until a built-in recurring job surface exists.
 
 ### Token budget
 
@@ -627,5 +703,4 @@ The following refinements are intentional omissions, not oversights:
 - Token-budgeted export flag (in addition to `--max-nodes`).
 - Stdin read timeouts (callers can wrap `ingest-transcript-handoff` with a wall-clock timeout).
 - Streaming NDJSON input format.
-- Transcript retention/cleanup command.
 - Neo4j backend support.

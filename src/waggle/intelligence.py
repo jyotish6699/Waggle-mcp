@@ -9,28 +9,46 @@ from difflib import SequenceMatcher
 
 from waggle.models import Node, NodeType, RelationType, utc_now
 
+# Hardcoded English stopword list (~150 words).
+# Chosen over NLTK to avoid a runtime dependency; covers the same high-frequency
+# function words that NLTK's corpus includes.  Update this set rather than
+# importing nltk if the list needs to grow.
 _STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "that",
-    "the",
-    "this",
-    "to",
-    "with",
+    "a", "about", "above", "after", "again", "against", "all", "also", "am",
+    "an", "and", "any", "are", "aren't", "as", "at",
+    "be", "because", "been", "before", "being", "below", "between", "both",
+    "but", "by",
+    "can", "can't", "cannot", "could", "couldn't",
+    "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down",
+    "during",
+    "each",
+    "few", "for", "from", "further",
+    "get", "got",
+    "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he",
+    "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself",
+    "him", "himself", "his", "how", "how's",
+    "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't",
+    "it", "it's", "its", "itself",
+    "just",
+    "let's",
+    "me", "more", "most", "mustn't", "my", "myself",
+    "no", "nor", "not", "now",
+    "of", "off", "on", "once", "only", "or", "other", "ought", "our",
+    "ours", "ourselves", "out", "over", "own",
+    "same", "shan't", "she", "she'd", "she'll", "she's", "should",
+    "shouldn't", "so", "some", "such",
+    "than", "that", "that's", "the", "their", "theirs", "them",
+    "themselves", "then", "there", "there's", "these", "they", "they'd",
+    "they'll", "they're", "they've", "this", "those", "through", "to",
+    "too",
+    "under", "until", "up",
+    "very",
+    "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were",
+    "weren't", "what", "what's", "when", "when's", "where", "where's",
+    "which", "while", "who", "who's", "whom", "why", "why's", "will",
+    "with", "won't", "would", "wouldn't",
+    "you", "you'd", "you'll", "you're", "you've", "your", "yours",
+    "yourself", "yourselves",
 }
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
@@ -554,20 +572,67 @@ def score_node(
     )
 
 
-def infer_relationship(source: Node, target: Node, *, shared_tokens: set[str] | None = None) -> RelationType:
-    shared_tokens = shared_tokens or (tokenize_text(source.content) & tokenize_text(target.content))
+# Minimum cosine similarity required for an embedding-derived RELATES_TO edge.
+RELATES_TO_COSINE_THRESHOLD: float = 0.55
+
+# Minimum number of non-stopword shared tokens required for RELATES_TO fallback.
+RELATES_TO_MIN_SHARED_TOKENS: int = 2
+
+# Confidence assigned to typed edges inferred from explicit keywords.
+TYPED_EDGE_CONFIDENCE: float = 0.9
+
+
+def infer_relationship(
+    source: Node,
+    target: Node,
+    *,
+    shared_tokens: set[str] | None = None,
+    cosine_similarity: float | None = None,
+) -> tuple[RelationType, float] | None:
+    """Infer the relationship type and confidence between two nodes.
+
+    Returns a ``(RelationType, confidence)`` tuple, or ``None`` if no edge
+    should be created.
+
+    Typed edges (DEPENDS_ON, UPDATES, PART_OF) are inferred from explicit
+    keywords and always carry ``TYPED_EDGE_CONFIDENCE`` (0.9).
+
+    RELATES_TO is only created when BOTH of the following hold:
+    - At least ``RELATES_TO_MIN_SHARED_TOKENS`` (2) non-stopword tokens are
+      shared between the two nodes.
+    - The cosine similarity between their embeddings is >=
+      ``RELATES_TO_COSINE_THRESHOLD`` (0.55).  When *cosine_similarity* is
+      not supplied (embeddings unavailable), the token condition alone is
+      sufficient — the confidence is set to 0.5 to signal lower certainty.
+
+    If neither condition is met, ``None`` is returned and no edge is created.
+    Unconnected nodes are still reachable via the verbatim transcript layer.
+    """
+    shared_tokens = shared_tokens if shared_tokens is not None else (
+        tokenize_text(source.content) & tokenize_text(target.content)
+    )
     pair_text = f"{normalize_text(source.content)} {normalize_text(target.content)}"
+
+    # ── Typed edges: keyword-driven, confidence = 0.9 ──────────────────────
     if any(keyword in pair_text for keyword in ("depends on", "requires", "blocked by", "needs")):
-        return RelationType.DEPENDS_ON
+        return RelationType.DEPENDS_ON, TYPED_EDGE_CONFIDENCE
     if any(keyword in pair_text for keyword in ("update", "updated", "refine", "replaces", "supersedes")):
-        return RelationType.UPDATES
+        return RelationType.UPDATES, TYPED_EDGE_CONFIDENCE
     if target.node_type == NodeType.CONCEPT and source.node_type != NodeType.CONCEPT:
-        return RelationType.PART_OF
-    if source.node_type == NodeType.QUESTION or target.node_type == NodeType.QUESTION:
-        return RelationType.RELATES_TO
-    if shared_tokens:
-        return RelationType.RELATES_TO
-    return RelationType.DERIVED_FROM
+        return RelationType.PART_OF, TYPED_EDGE_CONFIDENCE
+
+    # ── RELATES_TO: requires ≥2 shared non-stopword tokens AND cosine ≥ 0.55
+    enough_tokens = len(shared_tokens) >= RELATES_TO_MIN_SHARED_TOKENS
+    if not enough_tokens:
+        return None
+
+    if cosine_similarity is not None:
+        if cosine_similarity < RELATES_TO_COSINE_THRESHOLD:
+            return None
+        return RelationType.RELATES_TO, cosine_similarity
+
+    # cosine not available — accept on token evidence alone, lower confidence
+    return RelationType.RELATES_TO, 0.5
 
 
 def parse_since_value(value: str, *, now: datetime | None = None) -> datetime:
@@ -620,13 +685,11 @@ def infer_temporal_hints(query: str, *, now: datetime | None = None) -> Temporal
         return TemporalQueryHints(since=now - timedelta(days=1), recency_mode="recent")
     if "yesterday" in lowered:
         return TemporalQueryHints(since=now - timedelta(days=2), until=now - timedelta(days=1), recency_mode="recent")
-    if any(term in lowered for term in ("latest", "most recent", "newest", "current")):
+    if any(term in lowered for term in ("latest", "most recent", "newest")):
         return TemporalQueryHints(recency_mode="latest")
-    if " now" in f" {lowered} " and any(
-        token in lowered for token in ("use", "uses", "choice", "backend", "deploy", "expiry", "format")
-    ):
+    if re.search(r"\bnow\b", lowered):
         return TemporalQueryHints(recency_mode="latest")
-    if any(term in lowered for term in ("original", "originally", "initially", "first discussed", "first")):
+    if any(term in lowered for term in ("originally", "initially", "first discussed")):
         return TemporalQueryHints(recency_mode="oldest")
     if any(term in lowered for term in ("recently", "lately", "recent")):
         return TemporalQueryHints(recency_mode="recent")

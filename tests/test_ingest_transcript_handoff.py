@@ -658,6 +658,8 @@ class TestCLIIngestTranscriptHandoff:
         assert result["input_message_count"] == 2
         assert result["transcript_records_written"] == 2
         assert result["logical_turns_processed"] == 1
+        assert result["checkpoint_scope"] == "session"
+        assert Path(result["checkpoint_path"]).exists()
 
     def test_stdin_success_path(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
@@ -680,6 +682,8 @@ class TestCLIIngestTranscriptHandoff:
 
         assert exit_code == 0
         assert result["transcript_records_written"] == 2
+        assert result["checkpoint_scope"] == "session"
+        assert Path(result["checkpoint_path"]).exists()
 
     def test_scope_override_precedence(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -710,6 +714,8 @@ class TestCLIIngestTranscriptHandoff:
         assert exit_code == 0
         assert result["scope"]["session_id"] == "cli-session"
         assert result["scope"]["project"] == "cli-project"
+        assert result["checkpoint_scope"] == "session"
+        assert Path(result["checkpoint_path"]).exists()
 
     def test_input_size_guard_rejects_oversized_payload(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -751,6 +757,7 @@ class TestCLIIngestTranscriptHandoff:
         assert result["logical_turns_processed"] == 0
         assert result["export_skipped"] is True
         assert result["export_skipped_reason"] == "no_messages"
+        assert "checkpoint_path" not in result
 
     def test_malformed_json_returns_exit_1(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -913,6 +920,8 @@ class TestAdminCommandIntegration:
         assert exit_code == 0
         assert result["transcript_records_written"] == 2
         assert result["logical_turns_processed"] == 1
+        assert result["checkpoint_scope"] == "session"
+        assert Path(result["checkpoint_path"]).exists()
 
 
 # ---------------------------------------------------------------------------

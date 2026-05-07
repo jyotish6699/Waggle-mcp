@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 import json
 import re
+import shlex
+import subprocess
+import tempfile
 import urllib.error
 import urllib.request
 import requests
@@ -172,11 +176,23 @@ def _patched_get_client(response_fn: Callable[[str | dict[str, Any]], str] | Non
 
 
 def build_subprocess_response_fn(command_template: str) -> Callable[[str | dict[str, Any]], str]:
-    from waggle.oolong_benchmark import run_subprocess_llm
-
     def _response_fn(prompt: str | dict[str, Any]) -> str:
         rendered = prompt if isinstance(prompt, str) else str(prompt)
-        return run_subprocess_llm(rendered, command_template=command_template)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompt_path = Path(tmpdir) / "prompt.txt"
+            prompt_path.write_text(rendered, encoding="utf-8")
+            command = command_template.format(prompt_file=str(prompt_path), prompt=rendered)
+            completed = subprocess.run(
+                shlex.split(command),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    f"LLM command failed with exit code {completed.returncode}: {completed.stderr.strip()}"
+                )
+            return completed.stdout.strip()
 
     return _response_fn
 

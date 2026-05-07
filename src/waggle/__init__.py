@@ -50,7 +50,10 @@ __all__ = sorted(_LAZY_EXPORTS)
 
 
 def __getattr__(name: str):
-    module_name, attr_name = _LAZY_EXPORTS[name]
+    export = _LAZY_EXPORTS.get(name)
+    if export is None:
+        raise AttributeError(name)
+    module_name, attr_name = export
     module = import_module(module_name)
     value = getattr(module, attr_name)
     globals()[name] = value
@@ -60,5 +63,4 @@ def __getattr__(name: str):
 try:  # pragma: no cover
     __version__ = version("waggle-mcp")
 except PackageNotFoundError:  # pragma: no cover
-    __version__ = "0.1.11"
-
+    __version__ = "0.1.14"

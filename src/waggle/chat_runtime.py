@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
-from waggle.models import SubgraphResult
+from waggle.models import AbhiImportResult, PrimeContextResult, SubgraphResult
 from waggle.orchestrator import (
     AsyncMemoryOrchestrator,
     ConversationTurn,
@@ -29,6 +31,21 @@ class RuntimeTurnResult:
     assistant_response: str
     context: SubgraphResult | None
     ingest_plan: IngestPlan
+
+
+@dataclass(slots=True, frozen=True)
+class RuntimeCheckpointResult:
+    output_path: str
+    checkpoint_scope: str
+
+
+@dataclass(slots=True, frozen=True)
+class RuntimeResumeResult:
+    context: SubgraphResult | None
+    prime_context: PrimeContextResult | None
+    resumed_from_checkpoint: bool
+    checkpoint_path: str = ""
+    import_result: AbhiImportResult | None = None
 
 
 class OrchestratedChatRuntime:
@@ -64,6 +81,110 @@ class OrchestratedChatRuntime:
 
     async def flush(self) -> None:
         await self.orchestrator.flush()
+
+    async def checkpoint_current_context(
+        self,
+        *,
+        scope: MemoryScope,
+        output_path: str | None = None,
+        include_embeddings: bool = True,
+    ) -> RuntimeCheckpointResult:
+        await self.orchestrator.flush()
+
+        exporter = getattr(self.orchestrator.graph, "export_abhi", None)
+        if not callable(exporter):
+            raise RuntimeError("Checkpoint export requires a graph backend that implements export_abhi().")
+
+        checkpoint_scope = "session" if scope.session_id else "project" if scope.project else "all"
+        export_result = await asyncio.to_thread(
+            exporter,
+            output_path=output_path,
+            project=scope.project,
+            agent_id=scope.agent_id,
+            session_id=scope.session_id,
+            scope=checkpoint_scope,
+            include_embeddings=include_embeddings,
+        )
+        return RuntimeCheckpointResult(
+            output_path=str(export_result.output_path),
+            checkpoint_scope=checkpoint_scope,
+        )
+
+    async def resume_context(
+        self,
+        *,
+        scope: MemoryScope,
+        user_message: str = "",
+        checkpoint_path: str | None = None,
+        max_nodes: int | None = None,
+    ) -> RuntimeResumeResult:
+        context: SubgraphResult | None = None
+        prime_context: PrimeContextResult | None = None
+
+        if user_message.strip():
+            context = await self.orchestrator.build_context(
+                scope=scope,
+                request=RetrieveRequest(
+                    query=user_message.strip(),
+                    retrieval_mode=self.retrieval_mode,
+                    max_context_tokens=self.max_context_tokens,
+                    max_nodes=max_nodes or self.max_nodes,
+                    max_depth=self.max_depth,
+                ),
+            )
+        else:
+            prime_context = await self.orchestrator.build_prime(
+                scope=scope,
+                max_nodes=max_nodes or self.max_nodes,
+            )
+
+        if self._has_resume_context(context=context, prime_context=prime_context):
+            return RuntimeResumeResult(
+                context=context,
+                prime_context=prime_context,
+                resumed_from_checkpoint=False,
+            )
+
+        checkpoint = Path(checkpoint_path).expanduser() if checkpoint_path else None
+        importer = getattr(self.orchestrator.graph, "import_abhi", None)
+        if checkpoint is None or not checkpoint.exists() or not callable(importer):
+            return RuntimeResumeResult(
+                context=context,
+                prime_context=prime_context,
+                resumed_from_checkpoint=False,
+                checkpoint_path=str(checkpoint) if checkpoint else "",
+            )
+
+        import_result = await asyncio.to_thread(
+            importer,
+            input_path=checkpoint,
+            merge_strategy="skip-existing",
+        )
+
+        if user_message.strip():
+            context = await self.orchestrator.build_context(
+                scope=scope,
+                request=RetrieveRequest(
+                    query=user_message.strip(),
+                    retrieval_mode=self.retrieval_mode,
+                    max_context_tokens=self.max_context_tokens,
+                    max_nodes=max_nodes or self.max_nodes,
+                    max_depth=self.max_depth,
+                ),
+            )
+        else:
+            prime_context = await self.orchestrator.build_prime(
+                scope=scope,
+                max_nodes=max_nodes or self.max_nodes,
+            )
+
+        return RuntimeResumeResult(
+            context=context,
+            prime_context=prime_context,
+            resumed_from_checkpoint=True,
+            checkpoint_path=str(checkpoint),
+            import_result=import_result,
+        )
 
     async def handle_turn(
         self,
@@ -114,3 +235,20 @@ class OrchestratedChatRuntime:
             context=context,
             ingest_plan=ingest_plan,
         )
+
+    @staticmethod
+    def _has_resume_context(
+        *,
+        context: SubgraphResult | None,
+        prime_context: PrimeContextResult | None,
+    ) -> bool:
+        if context is not None and (
+            getattr(context, "nodes", None) or getattr(context, "replay_hits", None) or getattr(context, "fusion_hits", None) or getattr(context, "hybrid_hits", None)
+            or (isinstance(context, dict) and any(context.get(key) for key in ("nodes", "replay_hits", "fusion_hits", "hybrid_hits")))
+        ):
+            return True
+        if prime_context is not None and (
+            getattr(prime_context, "nodes", None) or (isinstance(prime_context, dict) and prime_context.get("nodes"))
+        ):
+            return True
+        return False

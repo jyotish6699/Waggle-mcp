@@ -96,10 +96,19 @@ class MemoryPolicy:
         "must",
         "should",
         "constraint",
+        "require",
+        "requirement",
         "remember",
         "always",
         "never",
         "policy",
+        "ship",
+        "publish",
+        "fix",
+        "fixed",
+        "implement",
+        "implemented",
+        "outcome",
     )
     skip_markers: tuple[str, ...] = (
         "thanks",
@@ -132,8 +141,7 @@ class MemoryPolicy:
         if any(marker in combined for marker in self.durable_markers):
             return IngestPlan(True, "durable signal detected")
 
-        # Default ingest for non-trivial turns unless explicitly chatty.
-        return IngestPlan(True, "non-trivial turn")
+        return IngestPlan(False, "durable-only policy: no durable signal")
 
     def mark_ingested(self, scope: MemoryScope, at: datetime) -> None:
         self.last_ingest_at[scope] = at

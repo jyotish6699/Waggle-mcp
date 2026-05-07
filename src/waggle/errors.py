@@ -52,3 +52,23 @@ class ServiceUnavailableError(WaggleError):
 class ValidationFailure(WaggleError):
     def __init__(self, message: str) -> None:
         super().__init__("validation_failed", message, status_code=400)
+
+
+class ConflictResolutionError(WaggleError):
+    def __init__(self, message: str) -> None:
+        super().__init__("conflict_resolution_failed", message, status_code=400)
+
+
+class DanglingEdgeError(WaggleError):
+    def __init__(self, message: str) -> None:
+        super().__init__("dangling_edge", message, status_code=400)
+
+
+class HashVerificationError(WaggleError):
+    def __init__(self, message: str) -> None:
+        super().__init__("hash_verification_failed", message, status_code=400)
+
+
+class SchemaVersionError(WaggleError):
+    def __init__(self, message: str) -> None:
+        super().__init__("schema_version_incompatible", message, status_code=400)

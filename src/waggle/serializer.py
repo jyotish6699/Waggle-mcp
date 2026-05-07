@@ -321,10 +321,18 @@ def serialize_recent_nodes(nodes: list[Node]) -> str:
 def serialize_observation_result(result: ObservationResult) -> str:
     lines = [
         "=== Conversation Observation ===",
+        f"Turn ID: {result.turn_id}",
+        f"Verbatim stored: {result.verbatim_stored}",
         f"Stored nodes: {len(result.stored_nodes)}",
+        f"Nodes extracted: {result.nodes_extracted}",
+        f"Edges inferred: {result.edges_inferred}",
         f"Created: {result.created_count}",
         f"Reused: {result.reused_count}",
     ]
+    if result.extraction_errors:
+        lines.extend(["", "[EXTRACTION DIAGNOSTICS]"])
+        for error in result.extraction_errors:
+            lines.append(f"• {error}")
     if result.stored_nodes:
         lines.extend(["", "[STORED]"])
         for node in result.stored_nodes:
