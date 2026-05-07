@@ -1406,7 +1406,7 @@ def test_default_graph_uses_home_scoped_sqlite_path(monkeypatch: pytest.MonkeyPa
     graph = _default_graph()
 
     assert isinstance(graph, MemoryGraph)
-    assert graph.db_path == tmp_path / ".waggle" / "memory.db"
+    assert graph.db_path == tmp_path / ".waggle" / "waggle.db"
 
 
 def test_default_graph_can_build_neo4j_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1455,7 +1455,8 @@ def test_write_other_config_no_longer_uses_pythonpath(monkeypatch: pytest.Monkey
     payload = json.loads(contents)
 
     assert "PYTHONPATH" not in contents
-    assert payload["args"] == ["-m", "waggle.server"]
+    assert payload["command"] == "waggle-mcp"
+    assert payload["args"] == ["serve", "--transport", "stdio"]
 
 
 def test_write_codex_config_no_longer_uses_pythonpath(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1466,7 +1467,8 @@ def test_write_codex_config_no_longer_uses_pythonpath(monkeypatch: pytest.Monkey
 
     assert config_path == tmp_path / ".codex" / "config.toml"
     assert "PYTHONPATH" not in contents
-    assert 'args = ["-m", "waggle.server"]' in contents
+    assert 'command = "waggle-mcp"' in contents
+    assert 'args = ["serve", "--transport", "stdio"]' in contents
     assert '[mcp_servers.waggle.env]' in contents
 
 
@@ -1495,7 +1497,8 @@ def test_write_gemini_config_preserves_existing_settings(monkeypatch: pytest.Mon
 
     assert payload["theme"] == "dark"
     assert "other" in payload["mcpServers"]
-    assert payload["mcpServers"]["waggle"]["command"] == "/tmp/fake-python"
+    assert payload["mcpServers"]["waggle"]["command"] == "waggle-mcp"
+    assert payload["mcpServers"]["waggle"]["args"] == ["serve", "--transport", "stdio"]
     assert payload["mcpServers"]["waggle"]["trust"] is False
 
 
@@ -1506,7 +1509,8 @@ def test_write_antigravity_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     payload = json.loads(config_path.read_text())
 
     assert config_path == tmp_path / ".gemini" / "antigravity" / "mcp_config.json"
-    assert payload["mcpServers"]["waggle"]["args"] == ["-m", "waggle.server"]
+    assert payload["mcpServers"]["waggle"]["command"] == "waggle-mcp"
+    assert payload["mcpServers"]["waggle"]["args"] == ["serve", "--transport", "stdio"]
 
 
 def test_run_setup_writes_codex_config_and_agents(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1555,7 +1559,8 @@ def test_write_codex_config_updates_existing_file_without_duplicates(monkeypatch
     assert contents.count("[mcp_servers.waggle.env]") == 1
     assert '[profile.default]\nmodel = "gpt-5.4"' in contents
     assert '[mcp_servers.playwright]\ncommand = "npx"' in contents
-    assert 'command = "/tmp/fake-python"' in contents
+    assert 'command = "waggle-mcp"' in contents
+    assert 'args = ["serve", "--transport", "stdio"]' in contents
     assert f'WAGGLE_DB_PATH = "{tmp_path / "memory.db"}"' in contents
     assert "/old/python" not in contents
     assert "/old/memory.db" not in contents

@@ -7,7 +7,7 @@ from pathlib import Path
 from waggle.errors import ValidationFailure
 from waggle.retrieval.hybrid import HybridRetrievalConfig
 
-DEFAULT_DB_PATH = "~/.waggle/memory.db"
+DEFAULT_DB_PATH = "~/.waggle/waggle.db"
 
 # Valid values for WAGGLE_STARTUP_MODE
 STARTUP_MODE_FAST = "fast"      # skip ML warmup; schema/inspection only

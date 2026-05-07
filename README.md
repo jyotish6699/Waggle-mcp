@@ -46,6 +46,40 @@ waggle-mcp doctor
 
 > **Windows users:** Run all commands with `python -X utf8` or set `PYTHONUTF8=1` to avoid `UnicodeEncodeError` from emoji in log output.
 
+## Install Waggle
+
+Waggle is a local MCP server that gives coding agents persistent graph memory.
+
+Recommended:
+
+- VS Code: install the live `Waggle: Local Memory for AI Agents` extension from the Marketplace for one-click setup
+- MCP clients: use [docs/install](./docs/install/README.md) and Smithery metadata in `smithery.yaml`
+- Claude: use [docs/install/claude-code.md](./docs/install/claude-code.md) or [docs/install/claude-desktop.md](./docs/install/claude-desktop.md)
+- Developers: `pipx install waggle-mcp`
+
+VS Code extension features:
+
+- one-click `Enable for this Workspace` onboarding
+- installs `waggle-mcp` with consent if it is missing
+- safely creates or updates `.vscode/mcp.json`
+- preserves existing non-Waggle MCP servers
+- runs `waggle-mcp doctor`
+- opens Graph Studio
+- exports Waggle memory from the editor
+
+Manual MCP config:
+
+```json
+{
+  "mcpServers": {
+    "waggle": {
+      "command": "waggle-mcp",
+      "args": ["serve", "--transport", "stdio"]
+    }
+  }
+}
+```
+
 ## Enterprise Evaluation
 
 For self-hosted production review and security posture:
@@ -235,7 +269,7 @@ Shared JSON config for clients that accept `mcpServers` JSON:
       "env": {
         "WAGGLE_TRANSPORT": "stdio",
         "WAGGLE_BACKEND": "sqlite",
-        "WAGGLE_DB_PATH": "~/.waggle/memory.db",
+        "WAGGLE_DB_PATH": "~/.waggle/waggle.db",
         "WAGGLE_DEFAULT_TENANT_ID": "local-default",
         "WAGGLE_MODEL": "all-MiniLM-L6-v2",
         "WAGGLE_STARTUP_MODE": "normal"
@@ -262,7 +296,7 @@ Add the `mcpServers` block above.
 claude mcp add waggle \
   --env WAGGLE_TRANSPORT=stdio \
   --env WAGGLE_BACKEND=sqlite \
-  --env WAGGLE_DB_PATH=~/.waggle/memory.db \
+  --env WAGGLE_DB_PATH=~/.waggle/waggle.db \
   --env WAGGLE_DEFAULT_TENANT_ID=local-default \
   --env WAGGLE_MODEL=all-MiniLM-L6-v2 \
   -- waggle-mcp serve
@@ -281,7 +315,7 @@ args    = ["serve"]
 env     = {
   WAGGLE_TRANSPORT         = "stdio",
   WAGGLE_BACKEND           = "sqlite",
-  WAGGLE_DB_PATH           = "~/.waggle/memory.db",
+  WAGGLE_DB_PATH           = "~/.waggle/waggle.db",
   WAGGLE_DEFAULT_TENANT_ID = "local-default",
   WAGGLE_MODEL             = "all-MiniLM-L6-v2"
 }
@@ -295,7 +329,7 @@ env     = {
 gemini mcp add waggle \
   -e WAGGLE_TRANSPORT=stdio \
   -e WAGGLE_BACKEND=sqlite \
-  -e WAGGLE_DB_PATH=~/.waggle/memory.db \
+  -e WAGGLE_DB_PATH=~/.waggle/waggle.db \
   -e WAGGLE_DEFAULT_TENANT_ID=local-default \
   -e WAGGLE_MODEL=all-MiniLM-L6-v2 \
   waggle-mcp serve
@@ -528,7 +562,7 @@ For broad summarization tasks, prefer `aggregate_graph` over `query_graph` when 
 
 ### Same machine — automatic sharing
 
-Point multiple clients at the same `WAGGLE_DB_PATH` (default `~/.waggle/memory.db`) and they share one brain automatically.
+Point multiple clients at the same `WAGGLE_DB_PATH` (default `~/.waggle/waggle.db`) and they share one brain automatically.
 
 ### Session handoffs
 
@@ -625,7 +659,7 @@ Controls the cosine similarity threshold for automatic node deduplication at wri
 
 ## Security & Privacy
 
-- Data stays local by default (`~/.waggle/memory.db`). No telemetry, no cloud calls for local operation.
+- Data stays local by default (`~/.waggle/waggle.db`). No telemetry, no cloud calls for local operation.
 - Memory only leaves your machine if you configure a remote backend or explicitly export/push.
 - Local SQLite is not encrypted at rest — use OS disk encryption if the stored history is sensitive.
 - Before `.abhi` export, Waggle scans transcript text for likely secrets (API keys, JWTs, passwords). Export is refused if secrets are found unless you pass `--force`.

@@ -51,7 +51,7 @@ from waggle.graph import MemoryGraph
 from waggle.embeddings import EmbeddingModel
 
 
-graph = MemoryGraph("~/.waggle/memory.db", EmbeddingModel("all-MiniLM-L6-v2"))
+graph = MemoryGraph("~/.waggle/waggle.db", EmbeddingModel("all-MiniLM-L6-v2"))
 orchestrator = AsyncMemoryOrchestrator(graph)
 runtime = OrchestratedChatRuntime(model=my_model_adapter, orchestrator=orchestrator)
 

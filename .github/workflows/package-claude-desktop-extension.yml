@@ -1,0 +1,49 @@
+name: Package Claude Desktop Extension
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package-mcpb:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/claude-desktop-extension
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: packages/claude-desktop-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Validate MCPB bundle
+        run: npm run validate
+
+      - name: Pack MCPB bundle
+        run: npm run pack
+
+      - name: Upload MCPB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: waggle-claude-desktop-extension
+          path: packages/claude-desktop-extension/*.mcpb
+
+      - name: Upload MCPB to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packages/claude-desktop-extension/*.mcpb

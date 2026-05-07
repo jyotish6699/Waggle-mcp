@@ -35,7 +35,7 @@
           "description": "Path to the SQLite memory database when WAGGLE_BACKEND is sqlite.",
           "isRequired": false,
           "format": "string",
-          "default": "~/.waggle/memory.db"
+          "default": "~/.waggle/waggle.db"
         },
         {
           "name": "WAGGLE_DEFAULT_TENANT_ID",

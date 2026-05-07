@@ -29,11 +29,11 @@ def test_dockerfile_uses_module_entrypoint_for_arg_passthrough() -> None:
     assert "SentenceTransformer('all-MiniLM-L6-v2')" in dockerfile
 
 
-def test_smithery_uses_installed_python_entrypoint() -> None:
+def test_smithery_uses_packaged_cli_entrypoint() -> None:
     smithery = (ROOT / "smithery.yaml").read_text()
 
-    assert "command: 'python'" in smithery
-    assert "args: ['-m', 'waggle.server', 'serve']" in smithery
+    assert "command: 'waggle-mcp'" in smithery
+    assert "args: ['serve', '--transport', config.WAGGLE_TRANSPORT || 'stdio']" in smithery
     assert not re.search(r"command:\\s*'uv'", smithery)
 
 
@@ -51,4 +51,5 @@ def test_package_version_matches_pyproject() -> None:
         "0.1.12",
         "0.1.13",
         "0.1.14",
+        "0.0.1",
     }

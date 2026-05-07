@@ -69,7 +69,7 @@ docker run --rm -p 8080:8080 \
       "env": {
         "WAGGLE_TRANSPORT": "stdio",
         "WAGGLE_BACKEND": "sqlite",
-        "WAGGLE_DB_PATH": "~/.waggle/memory.db",
+        "WAGGLE_DB_PATH": "~/.waggle/waggle.db",
         "WAGGLE_DEFAULT_TENANT_ID": "local-default",
         "WAGGLE_MODEL": "all-MiniLM-L6-v2"
       }
@@ -84,10 +84,10 @@ Claude Code supports MCP servers directly. The two practical ways to add Waggle 
 
 ```bash
 # Project-local (default)
-claude mcp add waggle --scope local --env WAGGLE_TRANSPORT=stdio --env WAGGLE_BACKEND=sqlite --env WAGGLE_DB_PATH=~/.waggle/memory.db --env WAGGLE_DEFAULT_TENANT_ID=local-default --env WAGGLE_MODEL=all-MiniLM-L6-v2 -- /path/to/.venv/bin/python -m waggle.server
+claude mcp add waggle --scope local --env WAGGLE_TRANSPORT=stdio --env WAGGLE_BACKEND=sqlite --env WAGGLE_DB_PATH=~/.waggle/waggle.db --env WAGGLE_DEFAULT_TENANT_ID=local-default --env WAGGLE_MODEL=all-MiniLM-L6-v2 -- /path/to/.venv/bin/python -m waggle.server
 
 # Shared project config in .mcp.json
-claude mcp add waggle --scope project --env WAGGLE_TRANSPORT=stdio --env WAGGLE_BACKEND=sqlite --env WAGGLE_DB_PATH=~/.waggle/memory.db --env WAGGLE_DEFAULT_TENANT_ID=local-default --env WAGGLE_MODEL=all-MiniLM-L6-v2 -- /path/to/.venv/bin/python -m waggle.server
+claude mcp add waggle --scope project --env WAGGLE_TRANSPORT=stdio --env WAGGLE_BACKEND=sqlite --env WAGGLE_DB_PATH=~/.waggle/waggle.db --env WAGGLE_DEFAULT_TENANT_ID=local-default --env WAGGLE_MODEL=all-MiniLM-L6-v2 -- /path/to/.venv/bin/python -m waggle.server
 ```
 
 Equivalent `.mcp.json` entry:
@@ -101,7 +101,7 @@ Equivalent `.mcp.json` entry:
       "env": {
         "WAGGLE_TRANSPORT": "stdio",
         "WAGGLE_BACKEND": "sqlite",
-        "WAGGLE_DB_PATH": "~/.waggle/memory.db",
+        "WAGGLE_DB_PATH": "~/.waggle/waggle.db",
         "WAGGLE_DEFAULT_TENANT_ID": "local-default",
         "WAGGLE_MODEL": "all-MiniLM-L6-v2"
       }
@@ -126,7 +126,7 @@ args    = ["-m", "waggle.server"]
 env     = {
   WAGGLE_TRANSPORT         = "stdio",
   WAGGLE_BACKEND           = "sqlite",
-  WAGGLE_DB_PATH           = "~/.waggle/memory.db",
+  WAGGLE_DB_PATH           = "~/.waggle/waggle.db",
   WAGGLE_DEFAULT_TENANT_ID = "local-default",
   WAGGLE_MODEL             = "all-MiniLM-L6-v2"
 }
@@ -142,7 +142,7 @@ Gemini CLI supports MCP servers through `~/.gemini/settings.json` or the `gemini
 gemini mcp add waggle \
   -e WAGGLE_TRANSPORT=stdio \
   -e WAGGLE_BACKEND=sqlite \
-  -e WAGGLE_DB_PATH=~/.waggle/memory.db \
+  -e WAGGLE_DB_PATH=~/.waggle/waggle.db \
   -e WAGGLE_DEFAULT_TENANT_ID=local-default \
   -e WAGGLE_MODEL=all-MiniLM-L6-v2 \
   waggle-mcp serve
@@ -159,7 +159,7 @@ Equivalent `~/.gemini/settings.json` entry:
       "env": {
         "WAGGLE_TRANSPORT": "stdio",
         "WAGGLE_BACKEND": "sqlite",
-        "WAGGLE_DB_PATH": "~/.waggle/memory.db",
+        "WAGGLE_DB_PATH": "~/.waggle/waggle.db",
         "WAGGLE_DEFAULT_TENANT_ID": "local-default",
         "WAGGLE_MODEL": "all-MiniLM-L6-v2"
       },
@@ -184,7 +184,7 @@ Environment variables:
 ```text
 WAGGLE_TRANSPORT=stdio
 WAGGLE_BACKEND=sqlite
-WAGGLE_DB_PATH=~/.waggle/memory.db
+WAGGLE_DB_PATH=~/.waggle/waggle.db
 WAGGLE_DEFAULT_TENANT_ID=local-default
 WAGGLE_MODEL=all-MiniLM-L6-v2
 ```
@@ -213,7 +213,7 @@ Configuration:
       "env": {
         "WAGGLE_TRANSPORT": "stdio",
         "WAGGLE_BACKEND": "sqlite",
-        "WAGGLE_DB_PATH": "~/.waggle/memory.db",
+        "WAGGLE_DB_PATH": "~/.waggle/waggle.db",
         "WAGGLE_DEFAULT_TENANT_ID": "local-default",
         "WAGGLE_MODEL": "all-MiniLM-L6-v2"
       }
@@ -323,7 +323,7 @@ A reusable copy also lives in [automatic-memory-rules.md](./automatic-memory-rul
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WAGGLE_DB_PATH` | `~/.waggle/memory.db` | path to the SQLite file |
+| `WAGGLE_DB_PATH` | `~/.waggle/waggle.db` | path to the SQLite file |
 
 ### HTTP service
 

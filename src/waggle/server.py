@@ -36,7 +36,7 @@ from starlette.staticfiles import StaticFiles
 
 from waggle import __version__
 from waggle.abhi import abhi_to_snapshot, build_abhi_document, execute_abhi_query, load_abhi_document, validate_abhi_document, serialize_abhi_diff
-from waggle.config import AppConfig, STARTUP_MODE_FAST, STARTUP_MODE_STRICT
+from waggle.config import AppConfig, DEFAULT_DB_PATH, STARTUP_MODE_FAST, STARTUP_MODE_STRICT
 from waggle.embeddings import EmbeddingModel, EMBEDDING_FREE_TOOLS, STATUS_READY, STATUS_DISABLED
 from waggle.errors import (
     AuthenticationError,
@@ -3809,7 +3809,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command")
-    subparsers.add_parser("serve", help="Run the MCP server using the configured stdio or HTTP transport.")
+    serve = subparsers.add_parser("serve", help="Run the MCP server using the configured stdio or HTTP transport.")
+    serve.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default=None,
+        help="Override WAGGLE_TRANSPORT for this run.",
+    )
     graph_editor = subparsers.add_parser(
         "edit-graph",
         help="Launch the visual graph editor in a browser window.",
@@ -3839,6 +3845,24 @@ def _build_parser() -> argparse.ArgumentParser:
     graph_ui.add_argument("--host", default="127.0.0.1")
     graph_ui.add_argument("--port", type=int, default=8686)
     graph_ui.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
+
+    graph_studio = subparsers.add_parser(
+        "graph-studio",
+        help="Alias for the local Graph Studio browser UI.",
+        description="Alias for ui/edit-graph. Starts the localhost Graph Studio and opens it by default.",
+    )
+    graph_studio.add_argument("--host", default="127.0.0.1")
+    graph_studio.add_argument("--port", type=int, default=8686)
+    graph_studio.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
+
+    open_studio = subparsers.add_parser(
+        "open-studio",
+        help="Alias for graph-studio.",
+        description="Alias for graph-studio/ui/edit-graph. Starts the localhost Graph Studio and opens it by default.",
+    )
+    open_studio.add_argument("--host", default="127.0.0.1")
+    open_studio.add_argument("--port", type=int, default=8686)
+    open_studio.add_argument("--open", action=argparse.BooleanOptionalAction, default=True)
 
     create_tenant = subparsers.add_parser("create-tenant", help="Create or update a tenant record in the active backend.")
     create_tenant.add_argument("--tenant-id", required=True)
@@ -4235,7 +4259,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "Supported: codex, claude-desktop, cursor, gemini, antigravity, other."
         ),
     )
-    setup.add_argument("--db", default="", help="Database path. Default: ~/.waggle/memory.db")
+    setup.add_argument("--db", default="", help="Database path. Default: ~/.waggle/waggle.db")
     setup.add_argument(
         "--model",
         default="all-MiniLM-L6-v2",
@@ -5114,6 +5138,11 @@ def _python_exe() -> str:
     return sys.executable
 
 
+def _default_stdio_command() -> str:
+    """Return the preferred packaged command name for public MCP client configs."""
+    return "waggle-mcp"
+
+
 # ── client config writers ────────────────────────────────────────────────────
 
 def _write_claude_desktop(db_path: str, python_exe: str) -> Path:
@@ -5134,10 +5163,9 @@ def _write_claude_desktop(db_path: str, python_exe: str) -> Path:
 
     existing.setdefault("mcpServers", {})
     existing["mcpServers"]["waggle"] = {
-        "command": python_exe,
-        "args": ["-m", "waggle.server"],
+        "command": _default_stdio_command(),
+        "args": ["serve", "--transport", "stdio"],
         "env": {
-            "WAGGLE_TRANSPORT": "stdio",
             "WAGGLE_BACKEND": "sqlite",
             "WAGGLE_DB_PATH": db_path,
             "WAGGLE_DEFAULT_TENANT_ID": "local-default",
@@ -5163,10 +5191,9 @@ def _write_cursor(db_path: str, python_exe: str) -> Path:
 
     existing.setdefault("mcpServers", {})
     existing["mcpServers"]["waggle"] = {
-        "command": python_exe,
-        "args": ["-m", "waggle.server"],
+        "command": _default_stdio_command(),
+        "args": ["serve", "--transport", "stdio"],
         "env": {
-            "WAGGLE_TRANSPORT": "stdio",
             "WAGGLE_BACKEND": "sqlite",
             "WAGGLE_DB_PATH": db_path,
             "WAGGLE_DEFAULT_TENANT_ID": "local-default",
@@ -5192,10 +5219,9 @@ def _write_gemini(db_path: str, python_exe: str) -> Path:
 
     existing.setdefault("mcpServers", {})
     existing["mcpServers"]["waggle"] = {
-        "command": python_exe,
-        "args": ["-m", "waggle.server"],
+        "command": _default_stdio_command(),
+        "args": ["serve", "--transport", "stdio"],
         "env": {
-            "WAGGLE_TRANSPORT": "stdio",
             "WAGGLE_BACKEND": "sqlite",
             "WAGGLE_DB_PATH": db_path,
             "WAGGLE_DEFAULT_TENANT_ID": "local-default",
@@ -5225,10 +5251,9 @@ def _write_antigravity(db_path: str, python_exe: str) -> Path:
 
     existing.setdefault("mcpServers", {})
     existing["mcpServers"]["waggle"] = {
-        "command": python_exe,
-        "args": ["-m", "waggle.server"],
+        "command": _default_stdio_command(),
+        "args": ["serve", "--transport", "stdio"],
         "env": {
-            "WAGGLE_TRANSPORT": "stdio",
             "WAGGLE_BACKEND": "sqlite",
             "WAGGLE_DB_PATH": db_path,
             "WAGGLE_DEFAULT_TENANT_ID": "local-default",
@@ -5246,11 +5271,10 @@ def _write_codex(db_path: str, python_exe: str) -> Path:
     config_file = config_dir / "config.toml"
     toml_block = (
         '[mcp_servers.waggle]\n'
-        f'command = "{python_exe}"\n'
-        'args = ["-m", "waggle.server"]\n'
+        f'command = "{_default_stdio_command()}"\n'
+        'args = ["serve", "--transport", "stdio"]\n'
         '\n'
         '[mcp_servers.waggle.env]\n'
-        'WAGGLE_TRANSPORT = "stdio"\n'
         'WAGGLE_BACKEND = "sqlite"\n'
         f'WAGGLE_DB_PATH = "{db_path}"\n'
         'WAGGLE_DEFAULT_TENANT_ID = "local-default"\n'
@@ -5293,10 +5317,9 @@ def _write_other(db_path: str, python_exe: str) -> Path:
     """Write a generic JSON snippet to ~/waggle-mcp-config.json."""
     config_file = Path.home() / "waggle-mcp-config.json"
     snippet = {
-        "command": python_exe,
-        "args": ["-m", "waggle.server"],
+        "command": _default_stdio_command(),
+        "args": ["serve", "--transport", "stdio"],
         "env": {
-            "WAGGLE_TRANSPORT": "stdio",
             "WAGGLE_BACKEND": "sqlite",
             "WAGGLE_DB_PATH": db_path,
             "WAGGLE_DEFAULT_TENANT_ID": "local-default",
@@ -5686,7 +5709,7 @@ def _run_setup(args: argparse.Namespace) -> int:
         _fail("Refusing to patch config without --yes. Use --dry-run to preview changes.")
         return 1
 
-    db_path_raw = args.db or str(Path.home() / ".waggle" / "memory.db")
+    db_path_raw = args.db or DEFAULT_DB_PATH
     db_path = str(Path(db_path_raw).expanduser().resolve())
     python_exe = _python_exe()
     clients = _setup_clients_from_args(args.clients)
@@ -5796,7 +5819,7 @@ def _run_init() -> int:
     clients = list(_CLIENT_WRITERS.keys())
     client = _prompt_choice("Which MCP client are you using?", clients)
 
-    default_db = str(Path.home() / ".waggle" / "memory.db")
+    default_db = DEFAULT_DB_PATH
     db_path_raw = _prompt_path("Where should the database be stored?", default_db)
     db_path = str(Path(db_path_raw).expanduser().resolve())
 
@@ -5879,10 +5902,13 @@ def main() -> None:
         sys.exit(_run_doctor(config, fix=bool(getattr(args, "fix", False))))
 
     config = AppConfig.from_env()
+    if command == "serve" and getattr(args, "transport", None):
+        config.transport = str(args.transport).strip().lower()
+        config.validate()
     log_stream = sys.stderr if config.transport == "stdio" else sys.stdout
     configure_logging(config.log_level, stream=log_stream)
     LOGGER.info("waggle_startup")
-    if command in {"edit-graph", "view-graph", "ui"}:
+    if command in {"edit-graph", "view-graph", "ui", "graph-studio", "open-studio"}:
         try:
             exit_code = _run_graph_editor_command(config, args)
         except ValidationFailure as exc:
