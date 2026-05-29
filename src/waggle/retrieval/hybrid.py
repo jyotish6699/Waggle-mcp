@@ -267,6 +267,7 @@ class HybridRetriever:
                 reasoning_from_reranker=item.reasoning_from_reranker,
                 observed_at=item.observed_at,
                 layer_scores=item.layer_scores,
+                score_explanation=item.score_explanation,
             )
             for item in reranked
         ]
