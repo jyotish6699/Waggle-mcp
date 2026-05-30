@@ -35,7 +35,7 @@ def test_resolve_output_paths_markdown(tmp_path):
         format="markdown",
         mode="graph",
     )
-
+    assert md_path.parent == tmp_path
     assert md_path is not None
     assert md_path.suffix == ".md"
     assert json_path is None
@@ -52,6 +52,7 @@ def test_resolve_output_paths_json(tmp_path):
     assert md_path is None
     assert json_path is not None
     assert json_path.suffix == ".json"
+    assert json_path.parent == tmp_path
 
 
 def test_resolve_output_paths_both(tmp_path):
@@ -62,8 +63,10 @@ def test_resolve_output_paths_both(tmp_path):
         mode="graph",
     )
 
-    assert md_path is not None
-    assert json_path is not None
+    assert md_path.parent == tmp_path
+    assert json_path.parent == tmp_path
+    assert md_path.suffix == ".md"
+    assert json_path.suffix == ".json"
 
 
 def test_resolve_output_paths_custom_output_path(tmp_path):
