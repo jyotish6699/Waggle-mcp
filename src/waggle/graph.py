@@ -8366,13 +8366,14 @@ class MemoryGraph:
         if not node_ids:
             return []
         placeholders = ", ".join("?" for _ in node_ids)
+        # Use OR so the graph walk can traverse outward: return any edge
+        # whose source OR target is in the current seed set.
         rows = connection.execute(
             f"""
             SELECT id, source_id, target_id, relationship, weight, metadata, created_at, tenant_id
             FROM edges
             WHERE tenant_id = ?
-              AND source_id IN ({placeholders})
-              AND target_id IN ({placeholders})
+              AND (source_id IN ({placeholders}) OR target_id IN ({placeholders}))
             ORDER BY created_at ASC
             """,
             (self.tenant_id, *node_ids, *node_ids),
