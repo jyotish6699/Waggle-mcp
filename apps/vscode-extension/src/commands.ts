@@ -340,24 +340,23 @@ export function registerWaggleCommands(ctx: WaggleContext, disposables: vscode.D
     }
   };
 
-  const maybePromptInstall = async (): Promise<void> => {
-    const method = ctx.config().get<string>("installMethod", "binary");
-    let available = false;
+  const tryAutoStartServer = async (): Promise<void> => {
+    if (!ctx.config().get<boolean>("autoStart", true) || !ctx.workspaceFolder()) {
+      return;
+    }
+    try {
+      await ensureServer();
+    } catch (error) {
+      ctx.append(`Background start failed: ${String(error)}`);
+    }
+  };
 
-    if (method === "binary") {
-      if (await ctx.resolver.hasCachedBinary()) {
-        available = await updateStatusFromEnvironment();
-      }
-      if (ctx.config().get<boolean>("autoStart", true) && ctx.workspaceFolder()) {
-        try {
-          await ensureServer();
-          available = true;
-        } catch (error) {
-          ctx.append(`Background start failed: ${String(error)}`);
-        }
-      }
-    } else {
-      available = await updateStatusFromEnvironment();
+  const maybePromptInstall = async (): Promise<void> => {
+    let available = await updateStatusFromEnvironment();
+
+    await tryAutoStartServer();
+    if (ctx.serverManager.runtime) {
+      available = true;
     }
 
     if (available) {

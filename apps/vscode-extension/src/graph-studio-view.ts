@@ -16,6 +16,7 @@ export class GraphStudioViewProvider implements vscode.WebviewViewProvider {
     this.view = webviewView;
     webviewView.webview.options = {
       enableScripts: true,
+      enableCommandUris: true,
       localResourceRoots: []
     };
     this.refresh();
@@ -29,8 +30,9 @@ export class GraphStudioViewProvider implements vscode.WebviewViewProvider {
     if (!runtime) {
       this.view.webview.html = `<!DOCTYPE html>
 <html><body style="font-family: sans-serif; padding: 1rem;">
-<p>Waggle server is not running.</p>
-<p>Run <strong>Waggle: Enable for this Workspace</strong> or turn on <code>waggle.autoStart</code>.</p>
+<p>Waggle HTTP server is not running.</p>
+<p><a href="command:waggle.openGraphStudio">Start Graph Studio</a> (starts the local server)</p>
+<p>Or run <strong>Waggle: Enable for this Workspace</strong>. Check the <strong>Waggle</strong> output channel if auto-start failed (common when the release binary is not downloaded yet — set <code>waggle.commandPath</code> to your <code>waggle-mcp.exe</code>).</p>
 </body></html>`;
       return;
     }

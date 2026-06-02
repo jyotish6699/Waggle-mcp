@@ -43,7 +43,8 @@ export class ServerManager {
 
     const command = await this.resolver.resolveCommandPath();
     this.port = this.context.globalState.get<number>("waggle.httpPort", 18765);
-    const args = ["graph-studio", "--host", "127.0.0.1", "--port", String(this.port), "--no-open"];
+    // edit-graph is the stable CLI name; graph-studio is a newer alias not in older PyPI builds.
+    const args = ["edit-graph", "--host", "127.0.0.1", "--port", String(this.port), "--no-open"];
     this.log(`Starting ${command} ${args.join(" ")}`);
 
     const child = spawn(command, args, {

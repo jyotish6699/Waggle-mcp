@@ -26,8 +26,21 @@ export class BinaryResolver {
 
   async resolveCommandPath(): Promise<string> {
     const method = this.config().get<string>("installMethod", "binary");
+    const configured = this.config().get<string>("commandPath", "waggle-mcp");
     if (method === "pipx") {
-      return this.config().get<string>("commandPath", "waggle-mcp");
+      return configured;
+    }
+    if (await this.hasCachedBinary()) {
+      return await this.cachedBinaryPath();
+    }
+    // Until GitHub Release ships PyInstaller assets, honor an explicit local CLI path.
+    if (path.isAbsolute(configured)) {
+      try {
+        await fs.access(configured);
+        return configured;
+      } catch {
+        // fall through to download
+      }
     }
     return this.ensureBinary();
   }
