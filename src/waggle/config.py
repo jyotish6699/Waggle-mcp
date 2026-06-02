@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass
@@ -54,10 +55,14 @@ def _parse_int(name: str, value: str) -> int:
 
 def _parse_float(name: str, value: str) -> float:
     try:
-        return float(value)
+        parsed = float(value)
     except ValueError as exc:
         raise ValidationFailure(f"{name} must be a float, got '{value}'.") from exc
 
+    if not math.isfinite(parsed):
+        raise ValidationFailure(f"{name} must be a finite float, got '{value}'.")
+
+    return parsed
 
 @dataclass(slots=True)
 class AppConfig:
@@ -105,7 +110,15 @@ class AppConfig:
     def from_env(cls) -> AppConfig:
         # Render (and other PaaS providers) commonly inject a dynamic `PORT` env var.
         # Prefer `WAGGLE_HTTP_PORT` when set, otherwise fall back to `PORT`.
-        resolved_http_port = os.environ.get("WAGGLE_HTTP_PORT") or os.environ.get("PORT") or "8080"
+        if os.environ.get("WAGGLE_HTTP_PORT") is not None:
+            http_port_name = "WAGGLE_HTTP_PORT"
+            resolved_http_port = os.environ["WAGGLE_HTTP_PORT"]
+        elif os.environ.get("PORT") is not None:
+            http_port_name = "PORT"
+            resolved_http_port = os.environ["PORT"]
+        else:
+            http_port_name = "WAGGLE_HTTP_PORT"
+            resolved_http_port = "8080"
         config = cls(
             backend=os.environ.get("WAGGLE_BACKEND", "sqlite").strip().lower(),
             transport=os.environ.get("WAGGLE_TRANSPORT", "stdio").strip().lower(),
@@ -114,7 +127,7 @@ class AppConfig:
             default_tenant_id=os.environ.get("WAGGLE_DEFAULT_TENANT_ID", "local-default").strip(),
             http_host=os.environ.get("WAGGLE_HTTP_HOST", "0.0.0.0"),
             http_port=_parse_int(
-                "WAGGLE_HTTP_PORT",
+                http_port_name,
                 resolved_http_port,
             ),
             log_level=os.environ.get("WAGGLE_LOG_LEVEL", "INFO"),
