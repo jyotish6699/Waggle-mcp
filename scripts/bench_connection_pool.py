@@ -1,4 +1,4 @@
-"""Ad-hoc before/after benchmark for issue #126 (not part of the package).
+"""Ad-hoc before/after benchmark for issue #126.
 
 Measures two things, reporting the median over several runs:
 
@@ -10,6 +10,7 @@ Measures two things, reporting the median over several runs:
 
 from __future__ import annotations
 
+import gc
 import statistics
 import sys
 import time
@@ -17,7 +18,13 @@ from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+# Locate the repo's src/ directory regardless of where this script lives
+# (repo root, scripts/, etc.) by walking up until we find src/waggle.
+_here = Path(__file__).resolve()
+for _candidate in (_here.parent, *_here.parents):
+    if (_candidate / "src" / "waggle").is_dir():
+        sys.path.insert(0, str(_candidate / "src"))
+        break
 
 import numpy as np  # noqa: E402
 
@@ -79,7 +86,7 @@ def e2e_once() -> tuple[float, float]:
 
         @contextmanager
         def fresh_checkout():
-            conn = graph._connect()
+            conn = graph._connect() # noqa: F821
             try:
                 yield conn
                 conn.commit()
@@ -89,12 +96,20 @@ def e2e_once() -> tuple[float, float]:
             finally:
                 conn.close()
 
+        original_checkout = graph._pool.checkout
         graph._pool.checkout = fresh_checkout  # type: ignore[method-assign]
         start = time.perf_counter()
         for i in range(N):
             graph.add_node(label=f"n{i}", content=f"content number {i}", node_type=NodeType.ENTITY)
         before = time.perf_counter() - start
+
+        # Break the reference cycle
+        graph._pool.checkout = original_checkout
         graph.close()
+
+        # Important: Force garbage collection INSIDE the 'with' block  before the temp dir attempts to delete the locked file.
+        del graph
+        gc.collect()
 
     # AFTER: real pooled connections.
     with TemporaryDirectory() as tmp:
@@ -104,6 +119,11 @@ def e2e_once() -> tuple[float, float]:
             graph.add_node(label=f"n{i}", content=f"content number {i}", node_type=NodeType.ENTITY)
         after = time.perf_counter() - start
         graph.close()
+
+        # Apply the same gc cleanup here as well
+        del graph
+        gc.collect()
+
     return before, after
 
 

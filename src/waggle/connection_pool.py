@@ -78,7 +78,10 @@ class SQLiteConnectionPool:
     ) -> None:
         if size < 1:
             raise ValueError("Connection pool size must be at least 1.")
-        self._factory = connection_factory
+        if checkout_timeout is not None and checkout_timeout < 0:
+            raise ValueError("checkout_timeout must be non-negative or None.")
+        if checkout_timeout is not None and checkout_timeout < 0:
+            raise ValueError("checkout_timeout must be non-negative or None.")
         self._size = size
         self._checkout_timeout = checkout_timeout
 
@@ -91,11 +94,14 @@ class SQLiteConnectionPool:
 
         # Build the connections up front.  If a later factory call fails, close
         # the ones already created so a failed startup neither leaks file
-        # handles nor leaves the database locked.
+        # handles nor leaves the database locked.  The factory is intentionally
+        # *not* retained afterwards: the pool is fixed-size and never creates
+        # more connections, and keeping the factory would pin whatever its
+        # closure captures (e.g. the owning MemoryGraph) for the pool's lifetime.
         created: list[sqlite3.Connection] = []
         try:
             for _ in range(size):
-                created.append(self._factory())
+                created.append(connection_factory())
         except BaseException:
             for connection in created:
                 with suppress(sqlite3.Error):
@@ -216,6 +222,8 @@ class SQLiteConnectionPool:
                 default the call does not wait; leased connections still close on
                 return.
         """
+        if drain_timeout is not None and drain_timeout < 0:
+            raise ValueError("drain_timeout must be non-negative or None.")
         with self._condition:
             if not self._closed:
                 self._closed = True

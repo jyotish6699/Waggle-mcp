@@ -140,6 +140,22 @@ def test_invalid_size_rejected(tmp_path: Path) -> None:
         SQLiteConnectionPool(factory, size=0)
 
 
+def test_negative_checkout_timeout_rejected(tmp_path: Path) -> None:
+    factory = _CountingFactory(tmp_path / "db.sqlite")
+    with pytest.raises(ValueError):
+        SQLiteConnectionPool(factory, checkout_timeout=-1.0)
+
+
+def test_negative_drain_timeout_rejected(tmp_path: Path) -> None:
+    factory = _CountingFactory(tmp_path / "db.sqlite")
+    created = SQLiteConnectionPool(factory, size=1)
+    try:
+        with pytest.raises(ValueError):
+            created.close(drain_timeout=-1.0)
+    finally:
+        created.close()
+
+
 def test_pragmas_applied_to_pooled_connections(pool: SQLiteConnectionPool) -> None:
     with pool.checkout() as connection:
         journal_mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
@@ -485,6 +501,28 @@ def test_memory_graph_is_a_context_manager(tmp_path: Path) -> None:
         graph.add_node(label="inside", content="within the with block", node_type=NodeType.ENTITY)
         pool = graph._pool
     assert pool.closed is True
+
+
+def test_for_tenant_clone_keeps_pool_alive_after_owner_is_dropped(tmp_path: Path) -> None:
+    import gc
+
+    graph = _make_graph(tmp_path)
+    clone = graph.for_tenant("tenant-x")
+    pool = clone._pool
+    assert pool.closed is False
+
+    # Drop the only external reference to the owner. Because the clone roots the
+    # owner (clone._pool_owner), the owner is not collected and its __del__ does
+    # not close the still-shared pool.
+    del graph
+    gc.collect()
+
+    assert pool.closed is False
+    # The clone can still use the pool after the owner reference is gone.
+    clone.add_node(label="after-owner-drop", content="clone still works", node_type=NodeType.ENTITY)
+    assert clone._pool.available() == clone._pool.size
+
+    clone.close()  # clone is a non-owner; pool is torn down when the owner is finalized
 
 
 def test_for_tenant_shares_pool_without_owning_it(tmp_path: Path) -> None:

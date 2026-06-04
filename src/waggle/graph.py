@@ -994,6 +994,8 @@ class MemoryGraph:
         clone._lock = self._lock
         clone._pool = self._pool
         clone._owns_pool = False
+
+        clone._pool_owner = self
         clone.ensure_tenant(clone.tenant_id)
         return clone
 
