@@ -124,11 +124,12 @@ flowchart LR
     C --> D[MemoryGraph.store_node]
     C --> F[MemoryGraph.store_edge]
     D --> E[Embedding generation]
-    D --> G[(SQLite)]
-    D --> H[(Neo4j)]
+    D --> G[(SQLite or Neo4j)]
     F --> G
-    F --> H
 ```
+
+Note: The runtime instantiates either MemoryGraph (SQLite) or Neo4jMemoryGraph based on config.backend.
+
 
 ### Query graph flow
 
@@ -140,8 +141,7 @@ flowchart LR
     D --> E[MemoryGraph._expand_node_depths]
     E --> F[RecursiveContextController.assemble]
     F --> G[Context returned]
-    D --> H[(SQLite)]
-    D --> I[(Neo4j)]
+    D --> H[(SQLite or Neo4j)]
 ```
 
 ### Transport layer
@@ -152,10 +152,8 @@ flowchart TB
     Client -->|MCP| S
     S --> OC[observe_conversation]
     S --> QG[query_graph / build_context]
-    OC --> G[(SQLite)]
-    OC --> N[(Neo4j)]
+    OC --> G[(SQLite or Neo4j)]
     QG --> G
-    QG --> N
 
 ```
 
