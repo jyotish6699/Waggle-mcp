@@ -150,7 +150,7 @@ def benchmark_single(model: Any, sentence: str, backend_name: str) -> dict[str, 
 
     # Calculate statistics
     median_latency = statistics.median(latencies)
-    p95_latency = sorted(latencies)[int(0.95 * len(latencies))]
+    p95_latency = sorted(latencies)[int(0.95 * (len(latencies) - 1))]
     throughput = 1000.0 / median_latency  # texts per second
     memory_mb = peak / (1024 * 1024)
 
@@ -202,7 +202,7 @@ def benchmark_batch(model: Any, sentences: list[str], batch_size: int, backend_n
 
     # Calculate statistics
     median_latency = statistics.median(latencies)
-    p95_latency = sorted(latencies)[int(0.95 * len(latencies))]
+    p95_latency = sorted(latencies)[int(0.95 * (len(latencies) - 1))]
     throughput = (batch_size * 1000.0) / median_latency  # texts per second
     memory_mb = peak / (1024 * 1024)
 
