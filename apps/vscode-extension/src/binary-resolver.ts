@@ -68,6 +68,36 @@ export class BinaryResolver {
     return this.cachedBinaryPathForVersion(await this.resolveRequestedVersion());
   }
 
+  private metadataSidecarPath(binaryPath: string): string {
+    return `${binaryPath}.metadata.json`;
+  }
+
+  private async readMetadataSidecar(binaryPath: string): Promise<BundleMetadata | undefined> {
+    try {
+      const raw = await fs.readFile(this.metadataSidecarPath(binaryPath), "utf8");
+      const parsed = JSON.parse(raw) as BundleMetadata;
+      if (parsed?.version && parsed.checksums) {
+        return parsed;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private async writeMetadataSidecar(binaryPath: string, metadata: BundleMetadata): Promise<void> {
+    await fs.writeFile(
+      this.metadataSidecarPath(binaryPath),
+      JSON.stringify({
+        version: metadata.version,
+        repository: metadata.repository,
+        assets: metadata.assets,
+        checksums: metadata.checksums
+      }),
+      "utf8"
+    );
+  }
+
   private async resolveCachedBinaryPath(): Promise<string | undefined> {
     const requested = await this.resolveRequestedVersion();
     const requestedPath = await this.cachedBinaryPathForVersion(requested);
@@ -107,6 +137,7 @@ export class BinaryResolver {
     try {
       await fs.access(destPath);
       await this.verifyCachedBinary(destPath, metadata);
+      await this.writeMetadataSidecar(destPath, metadata);
       return destPath;
     } catch {
       // download below
@@ -128,6 +159,7 @@ export class BinaryResolver {
         const url = `https://github.com/${metadata.repository}/releases/download/v${metadata.version}/${assetName}`;
         await this.downloadFile(url, destPath);
         await this.verifyCachedBinary(destPath, metadata);
+        await this.writeMetadataSidecar(destPath, metadata);
         if (process.platform !== "win32") {
           await fs.chmod(destPath, 0o755);
         }
@@ -248,7 +280,8 @@ export class BinaryResolver {
   }
 
   private async verifyCachedBinary(filePath: string, metadata?: BundleMetadata): Promise<void> {
-    const resolved = metadata ?? (await this.fetchBundleMetadata());
+    const resolved =
+      metadata ?? (await this.readMetadataSidecar(filePath)) ?? (await this.fetchBundleMetadata());
     const platform = platformAssetKey();
     const expectedRaw = resolved.checksums?.[platform];
     if (!expectedRaw) {
@@ -260,6 +293,7 @@ export class BinaryResolver {
     const actual = await this.sha256File(filePath);
     if (actual !== expected) {
       await fs.unlink(filePath).catch(() => undefined);
+      await fs.unlink(this.metadataSidecarPath(filePath)).catch(() => undefined);
       throw new Error(
         `Downloaded binary checksum mismatch for ${platform}. The file was removed; try again or report a compromised release.`
       );
