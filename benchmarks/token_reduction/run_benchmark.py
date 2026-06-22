@@ -1,11 +1,15 @@
 import json
 from pathlib import Path
+from rlm.utils.token_utils import count_tokens
 
 SCENARIOS_DIR = Path(__file__).parent / "scenarios"
 
 
 def estimate_tokens(text: str) -> int:
-    return max(1, len(text.split()))
+    return count_tokens(
+        [{"role": "user", "content": text}],
+        model_name="gpt-4o",
+    )
 
 
 def run():
